@@ -43,36 +43,54 @@ classdef nufftOp
 %               x = lsqr(Nfun,rootWy,tol,maxIt);
 %               x = reshape(x, N.imgNfull);
 %
-%   N.imgNfull = size: Causes output of N' to be a vector, which is required by functions like lsqr. The size is needed internally for subsequent N*(N'*x)
-%   N.kfull = size: Causes output of N to be a vector, which is required by functions like lsqr. The size is needed internally for subsequent N'*(N*x)
+%   N.imgNfull = size: Causes output of N' to be a vector, which is
+%     required by functions like lsqr. The size is needed internally for
+%     subsequent N*(N'*x) 
+%   N.kfull = size: Causes output of N to be a vector,
+%     which is required by functions like lsqr. The size is needed internally
+%     for subsequent N'*(N*x)
+%
+%   N = N.prepToep(os,kwidth): preps for Toeplitz usage, which causes N*x
+%       to actually give N'*(N*x). Uses Toeplitz properties to avoid
+%       convolutions. See Baron et al, https://doi.org/10.1002/mrm.26928
+%       - os and kwidth are optional inputs. Otherwise based on values in N
+%       object that is used to call prepToep
+%       - interestingly, with a precomputed convolution matrix, as used
+%       here, there seems to be no speed benefit to using Toeplitz with
+%       kwidth<=6 and os<=1.5. However, memory usage will be slightly lower.
+%         - with Toeplitz, you can increase kwidth and os for no speed
+%         penalty during iterations (prepToep will be slower, though)
 %
 % (c) Corey Baron 2020
 
-% TODO: implement Toeplitz.
+% TODO: should make a "low memory" option where the entire convolution
+% matrix is not precomputed. Instead, it could loop through the number of
+% kernel shifts (i.e., loop through numel(sampOffsets{nD})
 
 	properties
 	  % M1 x M2 = number of non-Cartesian samples. d = number of dims.
-		kwidth = 4;     % kernel width
+		kwidth = 6;     % kernel width. Must be even
 		os = 1.5;       % oversampling factor
 		useGPU = 1;	    % whether to use gpu. 
         useSingle = 0;  % whether to use single precision to save memory. NB: matlab currently does not support single sparse arrays, so this is not yet possible...
         imgNfull = [];  % total image size after nufftOp'*kvals. Allows for vector output on adjoint, which lsqr expects.
         kfull = [];     % total image size after nufftOp*image. Allows for vector output on forward, which lsqr expects.
         loopDim = 3;    % maximum number of dims to do matrix based mtimes rather than loops. Trade-off between speed and memory requirements
-	end
+        dcf = [];		% density compensation
+    end
 
 	properties (SetAccess = protected)
 		adjoint = 0;
 		% kloc: [N dim] k-space trajectory, scaled to [-0.5, 0.5] for all dims 
 		kloc = [];
-		dcf = [];					% density compensation
 		ksize = [];	      % size of k-matrix that was inputted
 		dcfsize = [];
 		dcfMask = [];
         osN = [];
         comp = [];
-        convMat = [];
+        convMat = [];       % sparse matrix for convolution operation. If toeplitz requested, holds transfer fcn
         imgN = [];   		% image matrix size
+        isToep = false;
     end
 
 	methods
@@ -252,10 +270,9 @@ classdef nufftOp
             elseif obj.adjoint && ~isempty(obj.kfull)
                 x = reshape(x,obj.kfull);
             end
-            szx = [size(x),1];
+            szx = [size(x),1,1,1,1];
 
-            % Data type conversion. TODO: I think there may be a bug here
-            % if x is already gpuArray.
+            % Data type conversion. 
             inClass = [];
             if ~obj.useSingle 
                 if ~isa(x,'gpuArray') && ~isa(x,'double')
@@ -270,21 +287,29 @@ classdef nufftOp
             end
 
             % Prepare for repetitions
-            if obj.adjoint
-                % Non-cartesian samples should always be a column vector
-                Nextra = szx(2:end);
-                y = zeros([obj.imgN, Nextra], 'like', x);
-                % Determine looping dims
-                loopDim_pos = max(obj.loopDim,length(obj.imgN));
-                loopDim_pre = loopDim_pos-length(obj.imgN)+1;
-                NextraInloop = szx(2:loopDim_pre);
-            else
+            if obj.isToep
                 Nextra = szx(length(obj.imgN)+1:end);
-                y = zeros([size(obj.kloc,1), Nextra], 'like', x);
-                % Determine looping dims
-                loopDim_pre = max(obj.loopDim,length(obj.imgN));
-                loopDim_pos = loopDim_pre-length(obj.imgN)+1;
+                y = zeros([obj.imgN, Nextra], 'like', x);
+                loopDim_pos = max(obj.loopDim,length(obj.imgN));
+                loopDim_pre = loopDim_pos;
                 NextraInloop = szx(length(obj.imgN)+1:loopDim_pre);
+            else
+                if obj.adjoint 
+                    % Non-cartesian samples should always be a column vector
+                    Nextra = szx(2:end);
+                    y = zeros([obj.imgN, Nextra], 'like', x);
+                    % Determine looping dims
+                    loopDim_pos = max(obj.loopDim,length(obj.imgN));
+                    loopDim_pre = loopDim_pos-length(obj.imgN)+1;
+                    NextraInloop = szx(2:loopDim_pre);
+                else
+                    Nextra = szx(length(obj.imgN)+1:end);
+                    y = zeros([size(obj.kloc,1), Nextra], 'like', x);
+                    % Determine looping dims
+                    loopDim_pre = max(obj.loopDim,length(obj.imgN));
+                    loopDim_pos = loopDim_pre-length(obj.imgN)+1;
+                    NextraInloop = szx(length(obj.imgN)+1:loopDim_pre);
+                end
             end
             Nrep = prod(szx(loopDim_pre+1:end));
             if isempty(NextraInloop)
@@ -299,34 +324,40 @@ classdef nufftOp
                     y_a = gpuArray(y_a);
                     wasNotGpu = true;
                 end
-                if obj.adjoint
-                    % non-Cartesian to Cartesian
-                    if ~isempty(obj.dcf)
-                        y_a = y_a.*obj.dcf;
-                    end
-                    y_a = obj.convMat'*y_a(:,:);
-                    y_a = reshape(y_a, [obj.osN,NextraInloop]);
-                    y_a = fftnc(y_a,length(obj.imgN));
-                    for nD=1:length(obj.imgN)
-                        % Crop away oversampling
-                        y_a = padcrop(y_a,obj.imgN(nD),nD);
-                        % Apply compensation for kernel transfer fcn
-                        y_a = y_a.*obj.comp{nD};
-                    end
+                if obj.isToep
+                    % Toep adjoint and forward are equivalent
+                    y_a = padcrop(fftnc(obj.convMat.*ifftnc(padcrop(y_a,2*obj.imgN),...
+                        length(obj.imgN)),length(obj.imgN)),obj.imgN);
                 else
-                    % Cartesian to non-Cartesian
-                    for nD=1:length(obj.imgN)
-                        % Precompensation is separable
-                        y_a = y_a.*obj.comp{nD};
-                        % Zero-pad
-                        y_a = padcrop(y_a,obj.osN(nD),nD);
-                    end
-                    y_a = ifftnc(y_a,length(obj.imgN));
-                    y_a = reshape(y_a,prod(obj.osN),[]);
-                    y_a = obj.convMat*y_a(:,:);
-                    y_a = reshape(y_a,[size(obj.kloc,1),NextraInloop]);
-                    if ~isempty(obj.dcf)
-                        y_a = y_a.*obj.dcf;
+                    if obj.adjoint
+                        % non-Cartesian to Cartesian
+                        if ~isempty(obj.dcf)
+                            y_a = y_a.*obj.dcf;
+                        end
+                        y_a = obj.convMat'*y_a(:,:);
+                        y_a = reshape(y_a, [obj.osN,NextraInloop]);
+                        y_a = fftnc(y_a,length(obj.imgN));
+                        for nD=1:length(obj.imgN)
+                            % Crop away oversampling
+                            y_a = padcrop(y_a,obj.imgN(nD),nD);
+                            % Apply compensation for kernel transfer fcn
+                            y_a = y_a.*obj.comp{nD};
+                        end
+                    else
+                        % Cartesian to non-Cartesian
+                        for nD=1:length(obj.imgN)
+                            % Precompensation is separable
+                            y_a = y_a.*obj.comp{nD};
+                            % Zero-pad
+                            y_a = padcrop(y_a,obj.osN(nD),nD);
+                        end
+                        y_a = ifftnc(y_a,length(obj.imgN));
+                        y_a = reshape(y_a,prod(obj.osN),[]);
+                        y_a = obj.convMat*y_a(:,:);
+                        y_a = reshape(y_a,[size(obj.kloc,1),NextraInloop]);
+                        if ~isempty(obj.dcf)
+                            y_a = y_a.*obj.dcf;
+                        end
                     end
                 end
                 if isa(y_a, 'gpuArray') && wasNotGpu
@@ -348,6 +379,30 @@ classdef nufftOp
             end
             
         end % end mtimes
+        
+        function obj = prepToep(obj,tos,kwidth)
+            if ~obj.isToep
+                % Finding toeplitz only requires one nufft, so accuracy
+                % requirement lower than nufft for S'*(S*x). Thus, reduce
+                % os to save memory
+                if nargin<2 || isempty(tos)
+                    tos = 0.5*(obj.os-1)+1; 
+                end
+                if nargin<3 || isempty(kwidth)
+                    kwidth = gather(obj.kwidth);
+                end
+                S = nufftOp(2*obj.imgN, gather(obj.kloc),gather(obj.dcf),obj.useGPU,tos,kwidth);
+                if ~isempty(obj.dcf)
+                    obj.convMat = S'*obj.dcf;
+                else
+                    obj.convMat = S'*ones(size(obj.kloc,1),1,'like',obj.kloc);
+                end
+                obj.convMat = (2^length(obj.imgN)) * ifftnc(obj.convMat);
+                obj.isToep = true;
+                % Toeplitz requires less memory for precomputations vs nufft, so allow for bigger arrays to save time
+                obj.loopDim = obj.loopDim + 1; 
+            end
+        end
         
         function obj = findDcf(obj,nit,isIt)
             % Based on the least-squares algorithm in Bydder et al. MRM, 25(5):695-702, 2007

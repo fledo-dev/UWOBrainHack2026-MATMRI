@@ -101,6 +101,28 @@ for nD = 1:3
     assert(testval < 1e-4, 'Comparison to fft failed. nD = %d', nD)
 end
 
+% Test Toeplitz
+for nD = 1:3
+    imN = repmat(64,[1 nD]);
+    kloc = [];
+    for n=1:length(imN)
+        kloc = cat(2,kloc, rand(0.25*prod(imN),1)-0.5);
+    end
+    dcf = rand(size(kloc,1),1);
+    useGPU = 0;
+    S = nufftOp(imN, kloc, dcf, useGPU,1.5,6);
+    S = S.prepToep;
+    % Gen data
+    x = randn([imN,2]) + 1i*randn([imN,2]);
+    S0 = nufftOp(imN, kloc, dcf, useGPU, 2, 8); % "truth" case
+    y0 = S0'*(S0*x);
+    y1 = S*x;
+    % Test
+    testval = y0-y1;
+    testval = sqrt(mean(testval(:).*conj(testval(:))));
+    assert(testval < 1e-3, 'Toeplitz failed. nD = %d', nD)
+end
+
 fprintf('Unit test success!\n')
 
 end

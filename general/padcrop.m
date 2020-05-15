@@ -6,6 +6,26 @@ function y = padcrop(x,szIn,dim)
 % (c) Corey Baron 2015
 % 
 
+if numel(szIn)>1 && nargin>2
+    error('Incompatible inputs: with dim supplied, szIn should be an integer')
+end
+if nargin<3
+    dim = [];
+end
+
+if ~isempty(dim)
+    y = singDim(x,szIn,dim);
+else
+    for dim=1:length(szIn)
+        x = singDim(x,szIn(dim),dim);
+    end
+    y = x;
+end
+
+end
+    
+
+function y = singDim(x,szIn,dim) 
 % Determine number to pad/crop
 sz = [size(x), ones(1,max(ndims(x),dim))];
 npc = szIn-sz(dim);
@@ -44,6 +64,7 @@ elseif npc<0
     end
 else
     y = x;
+end
 end
 
 
