@@ -123,6 +123,6 @@ for nD = 1:3
     assert(testval < 1e-3, 'Toeplitz failed. nD = %d', nD)
 end
 
-fprintf('Unit test success!\n')
+fprintf('nufftOp unit test success!\n')
 
 end

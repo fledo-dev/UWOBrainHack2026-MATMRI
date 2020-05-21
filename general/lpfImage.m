@@ -2,6 +2,8 @@ function x = lpfImage(x,type,alpha,dim)
   % win = filtNd(sz,alpha,dim, type)
   % alpha: alpha for type='kb', gaussian fwhm (in samples) for 'gauss'
   % No filtering along dims of k>dim
+  %
+  % (c) Corey Baron
 
   if nargin < 2
     type = 'kb';

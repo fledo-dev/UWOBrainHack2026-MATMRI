@@ -1,5 +1,7 @@
 function [R, theta, phi] = sphereGrid(sz)
 % Like meshgrid, but for spherical coordinates
+%
+% (c) Corey Baron
   
 theta = [];
 phi = [];

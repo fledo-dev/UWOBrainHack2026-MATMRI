@@ -1,7 +1,7 @@
 classdef nufftOp
 % Perform nufft using method of Beatty et al (doi.org/10.1109/TMI.2005.848376)
 %
-% Usage: Define nufft object using N = nufft(imN, kloc, {dcf, useGPU, os,
+% Usage: Define nufft object using N = nufftOp(imN, kloc, {dcf, useGPU, os,
 % kwidth}), where the inputs in {} are optional. Then, use N*im to apply
 % type 2 nufft (i.e., Cartesian to non-Cartesian) and use N'*kvals to apply
 % type 1 nufft (i.e., non-Cartesian to Cartesian). im can have higher
@@ -26,7 +26,7 @@ classdef nufftOp
 %   useGPU, default = false: whether to use GPU
 %   os, default = 1.5: oversampling ratio. See Beatty et al (doi.org/10.1109/TMI.2005.848376)
 %   kwidth, default = 4: kernel width. See Beatty et al (doi.org/10.1109/TMI.2005.848376)
-
+%
 % Member Functions:
 %   N = N.findDcf(numIterations,isIt): finds an optimal dcf. 
 %       numIterations, default = 10: number of iterations. Usually
@@ -37,18 +37,12 @@ classdef nufftOp
 %           e.g., to solve the problem argmin sqrt(W)(Ax-y) with lsqr, where y is acquired k-space data, use: 
 %               N = nufftOp(...); 
 %               N = N.findDcf([],true);
-%               N.imgNfull = size(N'*y); % Note, this method for finding the size is innefficient, and present just for illustrative purposes.
-%               rootWy = A.dcf.*y(:);
-%               Nfun = @(x,transp) netOp(x,transp,N); % netOp converts a series of linear operators to a fcn handle, required for lsqr. TODO: change if name of netOp changes.
-%               x = lsqr(Nfun,rootWy,tol,maxIt);
-%               x = reshape(x, N.imgNfull);
-%
-%   N.imgNfull = size: Causes output of N' to be a vector, which is
-%     required by functions like lsqr. The size is needed internally for
-%     subsequent N*(N'*x) 
-%   N.kfull = size: Causes output of N to be a vector,
-%     which is required by functions like lsqr. The size is needed internally
-%     for subsequent N'*(N*x)
+%               x0 = N'*y;
+%               opt.imNFull = size(x0); % required for vectorized outputs needed for lsqr
+%               Nfun = @(x,transp) mrSampFunc(x,transp,N,[],opt); % mrSampFunc creates the net MRI sampling operation
+%               rootWy = N.dcf.*y(:);
+%               x = lsqr(Nfun,rootWy,tol,maxIt,[],[],x0);
+%               x = reshape(x, N.imNFull);
 %
 %   N = N.prepToep(os,kwidth): preps for Toeplitz usage, which causes N*x
 %       to actually give N'*(N*x). Uses Toeplitz properties to avoid
@@ -68,21 +62,17 @@ classdef nufftOp
 % kernel shifts (i.e., loop through numel(sampOffsets{nD})
 
 	properties
-	  % M1 x M2 = number of non-Cartesian samples. d = number of dims.
 		kwidth = 6;     % kernel width. Must be even
 		os = 1.5;       % oversampling factor
 		useGPU = 1;	    % whether to use gpu. 
         useSingle = 0;  % whether to use single precision to save memory. NB: matlab currently does not support single sparse arrays, so this is not yet possible...
-        imgNfull = [];  % total image size after nufftOp'*kvals. Allows for vector output on adjoint, which lsqr expects.
-        kfull = [];     % total image size after nufftOp*image. Allows for vector output on forward, which lsqr expects.
         loopDim = 3;    % maximum number of dims to do matrix based mtimes rather than loops. Trade-off between speed and memory requirements
         dcf = [];		% density compensation
     end
 
 	properties (SetAccess = protected)
 		adjoint = 0;
-		% kloc: [N dim] k-space trajectory, scaled to [-0.5, 0.5] for all dims 
-		kloc = [];
+		kloc = []; % [N dim] k-space trajectory, scaled to [-0.5, 0.5] for all dims 
 		ksize = [];	      % size of k-matrix that was inputted
 		dcfsize = [];
 		dcfMask = [];
@@ -264,12 +254,6 @@ classdef nufftOp
         end
         
         function y = mtimes(obj,x)
-            % Un-vectorize
-            if ~obj.adjoint && ~isempty(obj.imgNfull)
-                x = reshape(x,obj.imgNfull);
-            elseif obj.adjoint && ~isempty(obj.kfull)
-                x = reshape(x,obj.kfull);
-            end
             szx = [size(x),1,1,1,1];
 
             % Data type conversion. 
@@ -365,12 +349,6 @@ classdef nufftOp
                 end
                 % Insert result into full array
                 y = setSub(y,y_a,loopDim_pos,nR); 
-            end
-            % Vectorize if requested via non-empty obj.imgNfull
-            if obj.adjoint && ~isempty(obj.imgNfull)
-                y = y(:);
-            elseif ~obj.adjoint && ~isempty(obj.kfull)
-                y = y(:);
             end
 
             % Revert class

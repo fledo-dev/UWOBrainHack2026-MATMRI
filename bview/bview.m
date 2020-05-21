@@ -1,5 +1,10 @@
 function varargout = bview(varargin)
 % BVIEW M-file for bview.fig
+%
+%   Simple image viewing and ROI drawing GUI.
+%
+%   (c) Corey Baron, 2010
+%
 %      BVIEW, by itself, creates a new BVIEW or raises the existing
 %      singleton*.
 %

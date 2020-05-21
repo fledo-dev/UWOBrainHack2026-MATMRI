@@ -2,6 +2,8 @@ function win = filtNd(sz,alpha,dim,type)
   % win = filtNd(sz,alpha,dim, type)
   % alpha: alpha for type='kb', gaussian fwhm (wrt full width of kspace) for 'gauss'
   % No filtering along dims of k>dim
+  %
+  % (c) Corey Baron
 
   switch type
   case 'kb'

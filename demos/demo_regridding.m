@@ -7,9 +7,6 @@
 %  More accurate reconstructions are obtained by finishing with a few
 %  conjugate gradient iterations (without a dcf)
 %
-%  Note: run the whole script once for the function at the bottom to get
-%  loaded into memory before running sections independently.
-%
 %  (c) Corey Baron, 2020
 
 %% Generate Simulation k-space data using nuFFT
@@ -46,10 +43,10 @@ im_r = Nop'*data;
 % Solves argmin(x) || Nop x - data ||_2^2
 % Requires few iterations for fully sampled with a good initialization
 Nop.dcf = [];
-Nop.imgNfull = size(im); % This causes vectorization of image output that is required for lsqr
-NopFunc_a = @(x,transp) NopFunc(x,transp,Nop); % Function needed for lsqr
+opt.imNFull = size(im); % This causes vectorization of image output that is required for lsqr
+opFunc_a = @(x,transp) mrSampFunc(x,transp,Nop,[],opt); % Function needed for lsqr
 Niterations = 3;
-im_i = lsqr(NopFunc_a,data,[],Niterations,[],[],im_r(:)); % Note the initial guess of im_r is not necessary, but it speeds up convergence
+im_i = lsqr(opFunc_a,data,[],Niterations,[],[],im_r(:)); % Note the initial guess of im_r is not necessary, but it speeds up convergence
 im_i = reshape(im_i,[N,N]);
 
 
@@ -61,12 +58,4 @@ subplot(2,2,3); imagesc(abs(im_r)); axis('image'); colormap('gray'); title('Regr
 subplot(2,2,4); imagesc(abs(im_i)); axis('image'); colormap('gray'); title('Iterative');
 
 
-%% Function required for lsqr
-function y = NopFunc(x,transp,Nop)
-    switch transp
-        case 'notransp'
-            y = Nop*x;
-        case 'transp'
-            y = Nop'*x;
-    end
-end
+

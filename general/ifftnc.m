@@ -1,5 +1,4 @@
 function a = ifftnc(a, N, doShift, doScale);
-% Written by Corey Baron
 % Calculates the multidimensional ifft of a matrix with DC at the
 % center of the matrix. 
 %
@@ -10,6 +9,7 @@ function a = ifftnc(a, N, doShift, doScale);
 % Outputs:
 %   A: output matrix
 % 
+% (c) Corey Baron
 
 if(nargin<4) || isempty(doScale)
   doScale = 1;

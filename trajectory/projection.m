@@ -1,6 +1,6 @@
 function [kloc,dcf] = projection(Nproj,NperProj,ndim)
-%PROJECTION Summary of this function goes here
-%   Detailed explanation goes here
+% Generate trajectory and density compensation function for projection trajectory.
+%   
 % (c) Corey Baron 2015
 %
 

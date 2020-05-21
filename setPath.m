@@ -1,10 +1,12 @@
-% Note: we avoid genpath on top repo dir as it will add the whole .git
-% folder and its subdirectories too.
+% Add all subdirectories to path
+%
+% (c) Corey Baron
 
 % Delete any parallel pools, because the workers won't get the new path otherwise
 if(exist('gcp'))
   poolobj = gcp('nocreate');
   delete(poolobj);
+  clear poolobj
 end
 
 topPath = mfilename('fullpath');
@@ -15,4 +17,8 @@ addpath([topPath, 'bview']);
 addpath([topPath, 'demos']);
 addpath([topPath, 'general']);
 addpath([topPath, 'operators']);
+addpath([topPath, 'simulation']);
 addpath([topPath, 'trajectory']);
+addpath([topPath, 'unitTests']);
+
+clear topPath 
