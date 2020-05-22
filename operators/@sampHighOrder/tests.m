@@ -1,6 +1,6 @@
-function res = tests(obj)
+function tests(obj)
 
-N0 = 128;
+N0 = 64;
 
 %% Check adjoint for basic case
 imN = [N0 N0];
@@ -25,7 +25,7 @@ assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 imN = [N0 N0];
 nExtra = [2 2];
 b0 = randn(imN) + rand;
-imk = [N0 1];
+imk = [N0 2];
 sampTimes = randn(imk)/sqrt(prod(imk));
 phs_spha = randn([16, size(sampTimes)]);
 phs_coco = randn([4, size(sampTimes)]);
@@ -41,7 +41,17 @@ d1 = dot(x(:),Sy(:));
 d2 = dot(Sx(:),y(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
-% Test vs Fourier transform
+%% Test single precision option
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,1,1);
+x = single(randn(imN) + randn);
+y = single(randn(imk) + randn);
+Sx = S*x;
+Sy = S'*y;
+d1 = dot(x(:),Sy(:));
+d2 = dot(Sx(:),y(:));
+assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-5, 'Single test failed.')
+
+%% Test vs Fourier transform
 N=64;
 [phs_grid.x, phs_grid.y] = meshgrid(-N/2:N/2-1,-N/2:N/2-1);
 phs_grid.z = zeros(size(phs_grid.x));
