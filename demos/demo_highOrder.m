@@ -3,6 +3,12 @@
 %  Try the regSENSE demo before this one. Here, we include spatially
 %  varying phase from eddy currents and B0 inhomogeniety via sampHighOrder.
 %
+%  sampHighOrder is a very powerful function to execute the forward model
+%  of MRI sampling (or its adjoint) with minimal assumptions, using a brute
+%  force execution of the summations in the MRI signal equation.
+%  Execution times are kept reasonable using precomputation and GPU (at the
+%  expense of requiring significant memory).
+%
 %  (c) Corey Baron, 2020
 
 %% Generate Simulation k-space data 
