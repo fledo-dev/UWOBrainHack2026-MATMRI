@@ -72,7 +72,7 @@ switch transp
         if ~isempty(R)
             x = R*x;
         end
-        if isa(samplingOp,'nufftOp')
+        if isa(samplingOp,'nufftOp') || isa(samplingOp,'sampHighOrder')
             x = samplingOp*x;
         else
             x = samplingOp.*ifftnc(x,ndims(samplingOp));
@@ -91,7 +91,7 @@ switch transp
         if ~isempty(opt.daNFull)
             x = reshape(x,opt.daNFull);
         end
-        if isa(samplingOp,'nufftOp')
+        if isa(samplingOp,'nufftOp') || isa(samplingOp,'sampHighOrder')
             x = samplingOp'*x;
         else
             x = samplingOp.*x;
