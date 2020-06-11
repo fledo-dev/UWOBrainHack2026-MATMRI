@@ -1,5 +1,7 @@
 function out = polysort(in)
 % Sorts indices of a polynomial ROI so that they go in order around the ROI
+% 
+% (c) Corey Baron 2010
 
 rest = in(2:end,:);
 out = in;

@@ -685,7 +685,7 @@ end
 
 function showroi(handles,slice_select,img) %shows all ROI Selected
     sz = size(handles.ROI_3d); % ROI (default)  
-    if (slice_select < length(handles.ROI_3d_par)) && ~isempty(handles.ROI_3d_par{slice_select}) && isequal(size(img),sz(1:2)) 
+    if (slice_select <= length(handles.ROI_3d_par)) && ~isempty(handles.ROI_3d_par{slice_select}) && isequal(size(img),sz(1:2)) 
       hold on   
            for n=1:length(handles.ROI_3d_par{slice_select})
              plot(handles.ROI_3d_par{slice_select}{n}(:,1),...
@@ -697,7 +697,7 @@ function showroi(handles,slice_select,img) %shows all ROI Selected
         roiname = sprintf('handles.ROI%d_3d',k);
         colours = {'y','m','g','r','b','c'}; 
         eval(sprintf('sz = size(%s);',roiname))
-        if eval(sprintf('(slice_select < length(%s_par))',roiname)) && eval(sprintf('~isempty(%s_par{slice_select}) && isequal(size(img),sz(1:2))',roiname)) 
+        if eval(sprintf('(slice_select <= length(%s_par))',roiname)) && eval(sprintf('~isempty(%s_par{slice_select}) && isequal(size(img),sz(1:2))',roiname)) 
          hold on   
            for n=1:eval(sprintf('length(%s_par{slice_select})',roiname))
              eval(sprintf('plot(%s_par{slice_select}{n}(:,1),%s_par{slice_select}{n}(:,2),''%s'')',roiname,roiname,colours{k}))
@@ -1086,8 +1086,15 @@ end
 slice_select = round(get(handles.slider1,'Value'));
 [roi_sub,xi,yi] = roipoly;
 sz = size(handles.img_ex);
+if length(sz)<3
+    sz = [sz,1];
+end
+szR = size(handles.ROI_3d);
+if length(szR)<3
+    szR = [szR,1];
+end
 if roi_select == 1  
-if ~isequal(sz(1:3),size(handles.ROI_3d))
+if ~isequal(sz(1:3),szR)
     handles.ROI_3d = false(sz(1:3));
     handles.ROI_3d_par = cell(sz(3),1);
 end 
@@ -1129,7 +1136,14 @@ end
 slice_select = round(get(handles.slider1,'Value'));
 [roi_sub,xi,yi] = roipoly;
 sz = size(handles.img_ex);
-if ~isequal(sz(1:3),size(handles.ROI2_3d))
+if length(sz)<3
+    sz = [sz,1];
+end
+szR = size(handles.ROI2_3d);
+if length(szR)<3
+    szR = [szR,1];
+end
+if ~isequal(sz(1:3),szR)
     handles.ROI2_3d = false(sz(1:3));
     handles.ROI2_3d_par = cell(sz(3),1);
 end
