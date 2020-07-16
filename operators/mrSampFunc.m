@@ -26,13 +26,14 @@ function y = mrSampFunc(x,transp,samplingOp,R,opt)
 %       opt.tikReg (default = []):  performs tikhonov regularization with 
 %         weighting factor opt.tikReg, assumging mrSampFunc() is supplied
 %         to a solver like lsqr().
+%       opt.sumDims (default = []): performs sum along the listed 
+%         dimensions during forward operation, after application of R.
+%         Useful for SMS recons, or ESPIRiT-based R with multiple sets
+%         of maps.
 %  Forward operation converts image domain to data samples. Adjoint
 %  converts data samples to image domain
 %
 % (c) Corey Baron 2020
-
-% TODO: could wrap time varying fields into this too. just do an isa for
-% sampWithRateMap and/or sampHighOrd as the samplingOp
 
 % Parse inputs
 if nargin<1
@@ -55,6 +56,9 @@ end
 if nargin<5 || ~isfield(opt,'tikReg')
     opt.tikReg = [];
 end
+if nargin<5 || ~isfield(opt,'sumDims')
+    opt.sumDims = [];
+end
 
 % Check incompatibilities
 if ~isempty(opt.tikReg) && (isempty(opt.imNFull) || isempty(opt.daNFull))
@@ -72,10 +76,20 @@ switch transp
         if ~isempty(R)
             x = R*x;
         end
+        if ~isempty(opt.sumDims)
+            % Note that the adjoint of this is not observed in transp case because of implicit repmat in matlab
+            for n=1:length(opt.sumDims)
+                x = sum(x,opt.sumDims(n));
+            end
+        end
         if isa(samplingOp,'nufftOp') || isa(samplingOp,'sampHighOrder')
             x = samplingOp*x;
         else
-            x = samplingOp.*ifftnc(x,ndims(samplingOp));
+            nDim = ndims(samplingOp);
+            if nDim==2 && size(samplingOp,2)==1
+                nDim = 1;
+            end
+            x = samplingOp.*ifftnc(x,nDim);
         end
         if ~isempty(opt.daNFull)
             x = x(:);
@@ -94,8 +108,12 @@ switch transp
         if isa(samplingOp,'nufftOp') || isa(samplingOp,'sampHighOrder')
             x = samplingOp'*x;
         else
+            nDim = ndims(samplingOp);
+            if nDim==2 && size(samplingOp,2)==1
+                nDim = 1;
+            end
             x = samplingOp.*x;
-            x = fftnc(x,ndims(samplingOp));
+            x = fftnc(x,nDim);
         end
         if ~isempty(R)
             x = R'*x;
@@ -115,41 +133,50 @@ function tests
     NR = 2;
     R = rcvrOp(rand([N N NR]),false);
     x = randn([N N]) + 1i*randn([N N]);
-    y = randn([N N NR]) + 1i*randn([N N NR]);
-    samplingOp = double(rand([N,N])>0.5);
-    for vectorize_im = [false,true]
-        for vectorize_da = [false,true]
-            if vectorize_im && vectorize_da
-                tikTests = [false,true];
-            else
-                tikTests = false;
-            end
-            for tikReg = tikTests
-                if vectorize_im
-                    opt.imNFull = [N N];
-                    x_a = x(:);
+    for sumDims = true % [false,true]
+        for vectorize_im = [false,true]
+            for vectorize_da = [false,true]
+                if vectorize_im && vectorize_da
+                    tikTests = [false,true];
                 else
-                    opt.imNFull = [];
-                    x_a = x;
+                    tikTests = false;
                 end
-                if vectorize_da
-                    opt.daNFull = [N N NR];
-                    y_a = y(:);
-                else
-                    opt.daNFull = [];
-                    y_a = y;
+                for tikReg = tikTests
+                    if sumDims
+                        samplingOp = double(rand([N,1])>0.5);
+                        y = randn([N 1 NR]) + 1i*randn([N 1 NR]);
+                        opt.sumDims = 2;
+                    else
+                        samplingOp = double(rand([N,N])>0.5);
+                        y = randn([N N NR]) + 1i*randn([N N NR]);
+                        opt.sumDims = [];
+                    end
+                    if vectorize_im
+                        opt.imNFull = [N N];
+                        x_a = x(:);
+                    else
+                        opt.imNFull = [];
+                        x_a = x;
+                    end
+                    if vectorize_da
+                        opt.daNFull = size(y);
+                        y_a = y(:);
+                    else
+                        opt.daNFull = [];
+                        y_a = y;
+                    end
+                    if tikReg
+                        opt.tikReg = 0.01;
+                        y_a = [y_a; x_a];
+                    else
+                        opt.tikReg = [];
+                    end
+                    Fx = mrSampFunc(x_a,'notransp',samplingOp,R,opt);
+                    Fy = mrSampFunc(y_a,'transp',samplingOp,R,opt);
+                    d1 = dot(x_a(:),Fy(:));
+                    d2 = dot(Fx(:),y_a(:));
+                    assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
                 end
-                if tikReg
-                    opt.tikReg = 0.01;
-                    y_a = [y_a; x_a];
-                else
-                    opt.tikReg = [];
-                end
-                Fx = mrSampFunc(x_a,'notransp',samplingOp,R,opt);
-                Fy = mrSampFunc(y_a,'transp',samplingOp,R,opt);
-                d1 = dot(x_a(:),Fy(:));
-                d2 = dot(Fx(:),y_a(:));
-                assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
             end
         end
     end

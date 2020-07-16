@@ -70,18 +70,20 @@ classdef rcvrOp
                 else
                     obj.apN = obj.imgN(1:obj.nDim);
                 end
-                if length(obj.apN) ~= obj.nDim
-                    error('apN must have length equal to number of dimensions')
+                if length(obj.apN) > obj.nDim
+                    error('apN must have length <= to number of dimensions')
+                else
+                    fftDim = length(obj.apN);
                 end
                 % Apodize
                 win = filtNd(obj.apN,obj.kalph,length(obj.apN),'kb');
                 if isa(input,'gpuArray')
                     win = gpuArray(win);
                 end
-                win = padcrop(win,obj.imgN(1:obj.nDim));
-                obj.maps = ifftnc(input,obj.nDim);
+                win = padcrop(win,obj.imgN(1:fftDim));
+                obj.maps = ifftnc(input,fftDim);
                 obj.maps = obj.maps.*win;
-                obj.maps = fftnc(obj.maps,obj.nDim);
+                obj.maps = fftnc(obj.maps,fftDim);
                 % Compute maps
                 obj.maps = obj.maps./sqrt(sum(obj.maps.*conj(obj.maps),...
                     length(obj.imgN)));
