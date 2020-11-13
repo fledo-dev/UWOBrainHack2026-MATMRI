@@ -59,6 +59,9 @@ end
 if nargin<5 || ~isfield(opt,'sumDims')
     opt.sumDims = [];
 end
+if nargin<5 || ~isfield(opt,'hardReal')
+    opt.hardReal = 0;
+end
 
 % Check incompatibilities
 if ~isempty(opt.tikReg) && (isempty(opt.imNFull) || isempty(opt.daNFull))
@@ -67,8 +70,15 @@ end
 
 switch transp
     case 'notransp'
+        if opt.hardReal
+            x = real(x);
+        end
         if ~isempty(opt.tikReg)
-            x_tik = opt.tikReg*x;
+            if numel(opt.tikReg) == 2
+                x_tik = opt.tikReg(1)*real(x) + 1i*opt.tikReg(2)*imag(x);
+            else
+                x_tik = opt.tikReg*x;
+            end
         end
         if ~isempty(opt.imNFull)
             x = reshape(x,opt.imNFull);
@@ -122,7 +132,15 @@ switch transp
             x = x(:);
         end
         if ~isempty(opt.tikReg)
-            x = x + opt.tikReg*x_tik;
+            if numel(opt.tikReg) == 2
+                x_tik = opt.tikReg(1)*real(x_tik) + 1i*opt.tikReg(2)*imag(x_tik);
+            else
+                x_tik = opt.tikReg*x_tik;
+            end
+            x = x + x_tik;
+        end
+        if opt.hardReal
+            x = real(x);
         end
 end   
 y = x;
