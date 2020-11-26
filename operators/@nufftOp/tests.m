@@ -123,6 +123,20 @@ for nD = 1:3
     assert(testval < 1e-3, 'Toeplitz failed. nD = %d', nD)
 end
 
+% Test dcf computation
+N0 = 64;
+dk_base = 1/N0;
+kloc_diff = linspace(dk_base/2,dk_base,2*N0);
+kloc = cumsum(kloc_diff);
+kloc = kloc/max(kloc)-0.5;
+S = nufftOp(N0,kloc');
+S = S.findDcf;
+dcf = S.dcf(1+10:end-1-10);
+dcf_theory = diff(kloc(1+10:end-10)');
+normVal = sum(dcf(round(2*N0/4):round(2*N0*3/4)))/sum(dcf_theory(round(2*N0/4):round(2*N0*3/4)));
+costval = norm(dcf/normVal - dcf_theory)/norm(dcf_theory);
+assert(costval < 0.025, 'dcf computation failed')
+
 fprintf('nufftOp unit test success!\n')
 
 end
