@@ -38,6 +38,15 @@ classdef sampHighOrder
 %   useSingle: if true, use single instead of double precision. Default =
 %       false. If set to true, memory savings will only be realized if the
 %       array that S operates on is also single.
+%   useInterp: uses an interpolated approach. Always faster than direct
+%       approach on CPU, but not recommended for small matrix sizes on GPU.
+%		See Wilm et al DOI: 10.1109/TMI.2012.2190991
+%   svdThresh (default = 0.05): trades off accuracy with speed when
+%       useInterp=1. Decrease to improve accuracy.
+%   subFact (default = 5): another trade-off for accuracy and speed for 
+%       useInterp=1. Decrease for accuracy. 5 or less should have
+%       negligible error. Min val = 1.
+%
 %
 %   Within the class, basis functions for each index of phs_spha and
 %   phs_conc are computed using basisFuncSphHarm and basisFuncConcGrad,
@@ -48,33 +57,56 @@ classdef sampHighOrder
 	properties
 		NDim = 2;   % Number of dims to do sums over in both image domain and k-space. 
         useSingle = 0;
-        useGPU = 1;
+		useGPU = 1;
+		useInterp = 0; 
+        svdThresh = 0.05; % Threshold for svd used in interpolated method
+        subFact = 5;      % Factor to subsample in time by for interpolated approach
 	end
 
 	properties (SetAccess = protected)
 		adjoint = 0;
 		b0 = []; % rad/sec
+        b0mask = [];
         phs_spha = []; % 0th, 1st, 2nd and 3rd order spherical harmonic terms for phase over time. Must have dimensions 16 x size(sampTimes). 
         phs_conc = []; % conc grad terms for phase over time. Must have dimensions 4 x size(sampTimes). 
         phs_grid = []; % Struct with fields phs_grid.X, phs_grid.Y, phs_grid.Z. Each must have dimensions equivalent to b0. MUST be in magnet frame.
 		sampTimes = []; % sec
 		kbase = []; % spatial part of spherical harmonics that is multiplied with phs_spha or phs_conc terms
+		traj = [];		  % Precomputed values for interpolated approach
+        svdSpace = [];    % Precomputed values for interpolated approach
+        svdTime = [];     % Precomputed values for interpolated approach
+        phsShft = [];
 		kSize = [];
 		imSize = [];
 	end
 
 	methods
 
-		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,useGPU,useSingle)
+		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFact)
 			if nargin == 0
 				obj.tests;
 				return;
-			end
-			if nargin>6
+            end
+            if nargin>5
+				obj.b0mask = b0mask;
+            end
+			if nargin>6 && ~isempty(useGPU)
 				obj.useGPU = useGPU;
             end
-            if nargin>6
+            if nargin>7 && ~isempty(useSingle)
 				obj.useSingle = useSingle;
+			end
+			if nargin>8 && ~isempty(useInterp)
+				obj.useInterp = useInterp;
+            end
+            if nargin>9 && ~isempty(svdThresh)
+				obj.svdThresh = svdThresh;
+            end
+            if nargin>10 && ~isempty(subFact)
+				obj.subFact = subFact;
+            end
+            if obj.subFact < 1
+                obj.subFact = 1;
             end
 			obj.NDim = 2; % This class currently coded/optimized for 2D only
 			obj.b0 = b0;    
@@ -101,10 +133,6 @@ classdef sampHighOrder
                 % of b0 = 1 x N.
                 error('need at least 2 dimensions')
             end
-			% Move all time dims to enable implicit replication when multiplying spatial dims by time dims
-			obj.sampTimes = permute(obj.sampTimes, [length(obj.kSize)+1:length(obj.kSize)+obj.NDim 1:length(obj.kSize)]);
-			obj.phs_spha = permute(obj.phs_spha, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
-			obj.phs_conc = permute(obj.phs_conc, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
 			% Use single precision if requested
 			if obj.useSingle
                 obj.sampTimes = single(obj.sampTimes);
@@ -114,6 +142,7 @@ classdef sampHighOrder
 				obj.phs_grid.x = single(obj.phs_grid.x);
 				obj.phs_grid.y = single(obj.phs_grid.y);
 				obj.phs_grid.z = single(obj.phs_grid.z);
+                obj.b0mask = single(obj.b0mask);
 			end
             % Move variables to GPU
 			if obj.useGPU
@@ -124,21 +153,13 @@ classdef sampHighOrder
 				obj.phs_grid.x = gpuArray(obj.phs_grid.x);
 				obj.phs_grid.y = gpuArray(obj.phs_grid.y);
 				obj.phs_grid.z = gpuArray(obj.phs_grid.z);
+                obj.b0mask = gpuArray(obj.b0mask);
 			end
-			% Precompute spatial variation at all times (high memory demand, but very fast)
-            phs = 0;
-			for n=1:size(obj.phs_spha,1)
-				% Add all spatially varying spherical harmonic terms
-				bfunc = obj.basisFuncSphHarm(n);
-				phs = phs + bfunc .* obj.phs_spha(n, 1, :, :);
+			if obj.useInterp
+                [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft] = prepForInterp(obj);
+			else
+				obj.kbase = prepForDirect(obj);
 			end
-			for n=1:size(obj.phs_conc,1)
-				% Add all concomitant gradient terms
-				bfunc = obj.basisFuncConcGrad(n);
-				phs = phs + bfunc .* obj.phs_conc(n, 1, :, :);
-			end
-			phs = phs + obj.b0.*obj.sampTimes;
-			obj.kbase = phs;
 		end
 
 		function y = mtimes(obj,x)
@@ -150,46 +171,191 @@ classdef sampHighOrder
             end
 
 			if obj.adjoint
-				% TODO: might have to make this single precision for large arrays
 				y = zeros([obj.imSize, szx(3:end)], 'like', x);
-				for n=1:prod(szx(3:end))
-					x_a = x(:,:,n);
-					x_a = permute(x_a, [obj.NDim+1:obj.NDim+length(obj.kSize) 1:obj.NDim]);
-					if obj.useGPU && ~isa(x_a, 'gpuArray')
-						x_a = gpuArray(x_a);
+			else
+				y = zeros([obj.kSize, szx(3:end)], 'like', x);
+			end
+			for n=1:prod(szx(3:end))
+				x_a = x(:,:,n);
+				if obj.useGPU && ~isa(x_a, 'gpuArray')
+					x_a = gpuArray(x_a);
+				end
+				y_a = applyModel(obj,x_a);
+				if ~isa(x,'gpuArray')
+					y_a = gather(y_a);
+				end
+				y(:,:,n) = y_a;
+            end
+        end
+		
+		function y = applyModel(obj,x)
+			if obj.useInterp
+				% Use nufft's and interpolation
+				y = 0;
+				if obj.adjoint
+					for l = 1:size(obj.svdSpace,2)
+                        y_a = x.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
+                        y_a = conj(obj.phsShft).*y_a;
+						y_a = obj.traj'*y_a;
+                        y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
 					end
-					y_a = x_a.*exp(-1i*obj.kbase);
-					y_a = sum(y_a,3);
-					y_a = sum(y_a,4);
-					if ~isa(x,'gpuArray')
-						y_a = gather(y_a);
+				else
+					for l = 1:size(obj.svdSpace,2)
+                        y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
+                        y_a = obj.traj*y_a;
+                        y_a = obj.phsShft.*y_a;
+                        y = y + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
 					end
-					y(:,:,n) = y_a;
 				end
 			else
-				% TODO: might have to make this single precision for large arrays
-				y = zeros([obj.kSize, szx(3:end)], 'like', x);
-				for n=1:prod(szx(3:end))
-					x_a = x(:,:,n);
-					if obj.useGPU && ~isa(x_a, 'gpuArray')
-						x_a = gpuArray(x_a);
-					end
-					y_a = x_a.*exp(1i*obj.kbase);
-					y_a = sum(y_a,1);
-					y_a = sum(y_a,2);
-					if ~isa(x,'gpuArray')
-						y_a = gather(y_a);
-					end
-					y(:,:,n) = reshape(y_a, obj.kSize);
-				end
+				% Use direct model
+				if obj.adjoint
+					x = permute(x, [obj.NDim+1:obj.NDim+length(obj.kSize) 1:obj.NDim]);
+					y = x.*exp(-1i*obj.kbase);
+					y = sum(y,3);
+					y = sum(y,4);
+				else
+					y = x.*exp(1i*obj.kbase);
+					y = sum(y,1);
+					y = sum(y,2);
+					y = reshape(y, obj.kSize);
+                end
+                
+                % Normalization so that a cartesian Fourier tranform would have
+                % the adjoint equal to the inverse
+                sz = size(obj.phs_grid.x);
+                y = y/sqrt(prod(sz(1:obj.NDim)));
 			end
-            
-            % Normalization so that a cartesian Fourier tranform would have
-            % the adjoint equal to the inverse
-            sz = size(obj.phs_grid.x);
-            y = y/sqrt(prod(sz(1:obj.NDim)));
+		end
+
+		function kbase = prepForDirect(obj,sphaInds)
+            if nargin<2 || isempty(sphaInds)
+                sphaInds = 1:size(obj.phs_spha,1);
+            end
+			% Move all time dims to enable implicit replication when multiplying spatial dims by time dims
+			sampTimes_a = permute(obj.sampTimes, [length(obj.kSize)+1:length(obj.kSize)+obj.NDim 1:length(obj.kSize)]);
+			phs_spha_a = permute(obj.phs_spha, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
+			phs_conc_a = permute(obj.phs_conc, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
+			% Precompute spatial variation at all times (high memory demand, but very fast)
+            phs = 0;
+			for n=sphaInds
+				% Add all spatially varying spherical harmonic terms
+				bfunc = obj.basisFuncSphHarm(n);
+				phs = phs + bfunc .* phs_spha_a(n, 1, :, :);
+			end
+			for n=1:size(phs_conc_a,1)
+				% Add all concomitant gradient terms
+				bfunc = obj.basisFuncConcGrad(n);
+				phs = phs + bfunc .* phs_conc_a(n, 1, :, :);
+			end
+			phs = phs + obj.b0.*sampTimes_a;
+            if ~isempty(obj.b0mask)
+                phs = phs.*obj.b0mask;
+            end
+			kbase = phs;
+		end
+		
+		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
+			% Create nufft object
+			% TODO: below assumes perfectly axial slices. To do this properly, need to:
+			% 1. have normal vector to slice as an optional input
+			% 2. find linear combination of terms 2:4 in kspha for in-plane to slice
+			% 3. set that to kloc, and substract from kspha. Then can still have all kspha terms in sum below
+            kloc = zeros(2,size(obj.phs_spha,2), 'like', obj.phs_spha);
+            if abs(obj.phs_grid.z(2,2)-obj.phs_grid.z(1,1)) ~= 0
+                error('non-axial slices not supported for interpolated approach')
+            end
+            if abs(obj.phs_grid.x(1,2)-obj.phs_grid.x(1,1)) > eps
+                if abs(obj.phs_grid.y(1,2)-obj.phs_grid.y(1,1)) ~= 0
+                    error('non-axial slices not supported for interpolated approach')
+                end
+                res1 = abs(obj.phs_grid.y(2,1)-obj.phs_grid.y(1,1));
+                res2 = abs(obj.phs_grid.x(1,2)-obj.phs_grid.x(1,1));
+                if obj.phs_grid.y(2,1)-obj.phs_grid.y(1,1) > 0
+                    kloc(1,:) = obj.phs_spha(3,:)/2/pi*res1;
+                else
+                    kloc(1,:) = -obj.phs_spha(3,:)/2/pi*res1;
+                end
+                if obj.phs_grid.x(1,2)-obj.phs_grid.x(1,1) > 0
+                    kloc(2,:) = obj.phs_spha(2,:)/2/pi*res2;
+                else
+                    kloc(2,:) = -obj.phs_spha(2,:)/2/pi*res2;
+                end
+                % Create phase ramp to center object domain properly, since
+                % nufft assumes isocenter is at matrix center
+                phsShft = obj.phs_grid.y(end/2+1,1)*obj.phs_spha(3,:) + ...
+                    obj.phs_grid.x(1,end/2+1)*obj.phs_spha(2,:);
+            else
+                res1 = abs(obj.phs_grid.x(2,1)-obj.phs_grid.x(1,1));
+                res2 = abs(obj.phs_grid.y(1,2)-obj.phs_grid.y(1,1));
+                if obj.phs_grid.x(2,1)-obj.phs_grid.x(1,1) > 0
+                    kloc(1,:) = obj.phs_spha(2,:)/2/pi*res1;
+                else
+                    kloc(1,:) = -obj.phs_spha(2,:)/2/pi*res1;
+                end
+                if obj.phs_grid.y(1,2)-obj.phs_grid.y(1,1) > 0
+                    kloc(2,:) = obj.phs_spha(3,:)/2/pi*res2;
+                else
+                    kloc(2,:) = -obj.phs_spha(3,:)/2/pi*res2;
+                end
+                % Create phase ramp to center object domain properly, since
+                % nufft assumes isocenter is at matrix center
+                phsShft = obj.phs_grid.x(end/2+1,1)*obj.phs_spha(2,:) + ...
+                    obj.phs_grid.y(1,end/2+1)*obj.phs_spha(3,:);
+            end
+            phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
+			traj = nufftOp(size(obj.b0), kloc');
+			clear kloc
+			% Determine full non-linear encoding matrix
+			b = prepForDirect(obj,[1,4:size(obj.phs_spha,1)]);
+			b = reshape(b, numel(obj.b0), numel(obj.sampTimes));
+            % Sub-sample b along time dimension to speed up svd, since
+            % phase is slowly varying in time. We do not subsample in
+            % space, since high resolution is important for the B0 map
+            if obj.subFact>1
+                inds = 1:obj.subFact:size(b,2);
+                if inds(end) ~= size(b,2)
+                    inds = [inds, size(b,2)]';
+                end
+                b = b(:,inds);
+            end
+            b = exp(1i*b);
+            % Find largest singular values and vectors
+            S = 1;
+            ntry = 0;
+            delTry = 30;
+            subspcFact = 3;
+            while (min(diag(S))/max(S(:)) > obj.svdThresh) 
+                if ntry > 200
+                    error('many large singular values. Try providing mask or adjusting svdThresh.')
+                end
+                ntry = ntry + delTry;
+                [U,S,V,FLAG] = svds(b,ntry,'largest','SubspaceDimension',subspcFact*ntry);
+                if FLAG
+                    warning('svd failure to converge. Increasing subspace.')
+                    ntry = ntry - delTry;
+                    subspcFact = subspcFact+1;
+                end
+            end
+            Ns = find(diag(S)/max(S(:))<obj.svdThresh,1,'first');
+            svdTime = conj(V(:,1:Ns)*S(1:Ns,1:Ns));
+            if obj.subFact
+                svdTime = interp1(inds,gather(svdTime),1:inds(end),'pchip');
+                svdTime = gpuArray(svdTime);
+            end
+            svdSpace = U(:,1:Ns);
+            clear U V
+			% Compute error wrt direct approach
+			if (0)
+				erVal = gather(svdSpace)*gather(svdTime.');
+				b = prepForDirect(obj,[1,4:size(obj.phs_spha,1)]);
+				b = reshape(b, numel(obj.b0), numel(obj.sampTimes));
+                b = exp(1i*b);
+                erVal = erVal(:) - gather(b(:));
+                erVal = norm(erVal)/norm(b(:))
+			end
         end
-        
+
         function  res = ctranspose(obj)
             obj.adjoint = xor(obj.adjoint,1);
             res = obj;

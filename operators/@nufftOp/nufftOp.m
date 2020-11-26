@@ -81,6 +81,7 @@ classdef nufftOp
         convMat = [];       % sparse matrix for convolution operation. If toeplitz requested, holds transfer fcn
         imgN = [];   		% image matrix size
         isToep = false;
+        nofftShift = 1; % do not explicitely use fftshifts to save time. 
     end
 
 	methods
@@ -129,7 +130,13 @@ classdef nufftOp
             obj = obj.doPrep;
         end
 
-		function obj = doPrep(obj)
+        function obj = doPrep(obj)
+            if obj.nofftShift  
+                % Perform fftshift in k-space by simply adjusting k-space indices
+                kloc_a = obj.kloc + 0.5;
+            else
+                kloc_a = obj.kloc;
+            end
 			% Set oversampled grid size 
 			obj.osN = ceil(obj.imgN*obj.os/2)*2; % Make a factor of 2
 			% Minimize number of prime factors
@@ -137,7 +144,7 @@ classdef nufftOp
 				while (max(factor(obj.osN(nD))) > 7)
 					obj.osN(nD) = obj.osN(nD) + 2;
 				end
-			end
+            end
 			% Precompute gridding kernel. 
             precision = 10^-6;
 			bet = pi*sqrt(obj.kwidth^2/obj.os^2*(obj.os-0.5)^2-0.8);
@@ -163,7 +170,7 @@ classdef nufftOp
                 end
 				x = sqrt(x.^2-bet^2);
 				obj.comp{nD} = x./sin(x);
-                obj.comp{nD} = obj.comp{nD}/obj.comp{nD}(end/2+1); % Normalize
+                obj.comp{nD} = obj.comp{nD}/min(obj.comp{nD}); % Normalize
                 % Account for different fft scalings for different os (so
                 % that choice of os does not scale result)
                 obj.comp{nD} = obj.comp{nD}*sqrt(obj.osN(nD)/obj.imgN(nD));
@@ -173,7 +180,7 @@ classdef nufftOp
                 end
             end
             % Precompute kernel weighting terms using linear interpolation
-            C = ones(size(obj.kloc,1),obj.kwidth^length(obj.imgN), 'like', obj.kloc);
+            C = ones(size(kloc_a,1),obj.kwidth^length(obj.imgN), 'like', kloc_a);
             sampOffsets = cell(length(obj.imgN),1);
             switch length(obj.imgN)
                 case 1
@@ -202,7 +209,7 @@ classdef nufftOp
                 end
             end
             for nD = 1:length(obj.imgN)
-                kernInds_a = obj.kloc(:,nD)*obj.osN(nD);
+                kernInds_a = kloc_a(:,nD)*obj.osN(nD);
                 kernInds_a = floor(kernInds_a)-kernInds_a;
                 for nS = 1:numel(sampOffsets{1})
                     kernInds = kernInds_a+sampOffsets{nD}(nS); % in units of Cartesian k-space grid samples
@@ -217,8 +224,8 @@ classdef nufftOp
             % Determine Cartesian indices that correspond to each kernel term
             cartInds = cell(length(obj.imgN), 1);
             for nD=1:length(obj.imgN)
-                cartInds{nD} = floor(obj.kloc(:,nD)*obj.osN(nD));
-                cartInds{nD} = repmat(sampOffsets{nD}(:)', size(obj.kloc,1),1) +...
+                cartInds{nD} = floor(kloc_a(:,nD)*obj.osN(nD));
+                cartInds{nD} = repmat(sampOffsets{nD}(:)', size(kloc_a,1),1) +...
                     cartInds{nD} + obj.osN(nD)/2 + 1;
                 % Wrap indices around (i.e., account for circular shift property of fft)
                 cartInds{nD}(cartInds{nD} > obj.osN(nD)) = cartInds{nD}(cartInds{nD} > obj.osN(nD)) - obj.osN(nD);
@@ -234,7 +241,7 @@ classdef nufftOp
             end
             % Create sparse matrix for convolution operation (Cartesian to
             % non-Cartesian)
-            nonCartInds = (1:size(obj.kloc,1))';
+            nonCartInds = (1:size(kloc_a,1))';
             if obj.useSingle
                 nonCartInds = single(nonCartInds);
             end
@@ -242,7 +249,28 @@ classdef nufftOp
                 nonCartInds = gpuArray(nonCartInds);
             end
             nonCartInds = repmat(nonCartInds, [1 obj.kwidth^length(obj.imgN)]);
-            obj.convMat = sparse(nonCartInds(:),cartInds(:),C(:),size(obj.kloc,1),prod(obj.osN));   
+            obj.convMat = sparse(nonCartInds(:),cartInds(:),C(:),size(kloc_a,1),prod(obj.osN)); 
+            if obj.nofftShift  
+                % Perform image domain fftshift simultaneously with convolution operation in k-space
+                fftShiftMat = (0:obj.osN(1)-1)';
+                if length(obj.imgN)>1
+                    fftShiftMat = repmat(fftShiftMat, [1 obj.osN(2)]) + (0:obj.osN(2)-1);
+                end
+                if length(obj.imgN)>2
+                    fftShiftMat = repmat(fftShiftMat, [1 1 obj.osN(3)]) + reshape(0:obj.osN(3)-1, [1 1 obj.osN(3)]);
+                end
+                fftShiftMat = exp(1i*pi*fftShiftMat);
+                fftShiftMat = gather(fftShiftMat);
+                fftShiftMat = spdiags(fftShiftMat(:), 0, numel(fftShiftMat), numel(fftShiftMat));
+                if obj.useGPU
+                    fftShiftMat = gpuArray(fftShiftMat);
+                end
+                % Used complex values to simplify generation of
+                % fftShiftMat. Now we make it real again.
+                fftShiftMat = round(real(fftShiftMat)); 
+                obj.convMat = obj.convMat*fftShiftMat;
+                clear fftShiftMat
+            end
 		end
 
 		function obj = ctranspose(obj)
@@ -310,6 +338,7 @@ classdef nufftOp
                 end
                 if obj.isToep
                     % Toep adjoint and forward are equivalent
+                    % TODO: this could probably be done with avoided explicit fftshifts
                     y_a = padcrop(fftnc(obj.convMat.*ifftnc(padcrop(y_a,2*obj.imgN),...
                         length(obj.imgN)),length(obj.imgN)),obj.imgN);
                 else
@@ -318,12 +347,14 @@ classdef nufftOp
                         if ~isempty(obj.dcf)
                             y_a = y_a.*obj.dcf;
                         end
-                        y_a = obj.convMat'*y_a(:,:);
+                        y_a = obj.convMat'*y_a(:,:); 
                         y_a = reshape(y_a, [obj.osN,NextraInloop]);
-                        y_a = fftnc(y_a,length(obj.imgN));
+                        y_a = fftnc(y_a,length(obj.imgN),~obj.nofftShift);
                         for nD=1:length(obj.imgN)
                             % Crop away oversampling
                             y_a = padcrop(y_a,obj.imgN(nD),nD);
+                        end
+                        for nD=1:length(obj.imgN)
                             % Apply compensation for kernel transfer fcn
                             y_a = y_a.*obj.comp{nD};
                         end
@@ -332,10 +363,12 @@ classdef nufftOp
                         for nD=1:length(obj.imgN)
                             % Precompensation is separable
                             y_a = y_a.*obj.comp{nD};
+                        end
+                        for nD=1:length(obj.imgN)
                             % Zero-pad
                             y_a = padcrop(y_a,obj.osN(nD),nD);
                         end
-                        y_a = ifftnc(y_a,length(obj.imgN));
+                        y_a = ifftnc(y_a,length(obj.imgN),~obj.nofftShift);
                         y_a = reshape(y_a,prod(obj.osN),[]);
                         y_a = obj.convMat*y_a(:,:);
                         y_a = reshape(y_a,[size(obj.kloc,1),NextraInloop]);
