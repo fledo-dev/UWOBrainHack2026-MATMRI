@@ -6,7 +6,7 @@ classdef sampHighOrder
 %
 % Usage: 
 %   Define sampHighOrder object using 
-%       S = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,useGPU,useSingle)
+%       S = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,imMask,useGPU,useSingle,useInterp,svdThresh,subFact)
 %   Sample image using data = S*image. x can have more dimensions than
 %       b0, but summations are only performed over first two dims (i.e., 2D
 %       imaging is assumed). Fairly high memory overhead due to 
@@ -34,6 +34,11 @@ classdef sampHighOrder
 %           phs_grid.x: value of x at each position in units of m. 
 %           phs_grid.y: value of y at each position in units of m. 
 %           phs_grid.z: value of z at each position in units of m. 
+%   imMask: mask denoted expected location of signal. b0map and 2nd
+%       order+ spherical harmonic phase terms are set to 0 outside the
+%       mask. This improves the performance of interpolation (useInterp
+%       option), because it removes regions with quickly varying phase that
+%       are irrevelant to image recon (since there's no signal there).
 %   useGPU: whether to use GPU. Default = true.
 %   useSingle: if true, use single instead of double precision. Default =
 %       false. If set to true, memory savings will only be realized if the
@@ -238,20 +243,29 @@ classdef sampHighOrder
 			phs_conc_a = permute(obj.phs_conc, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
 			% Precompute spatial variation at all times (high memory demand, but very fast)
             phs = 0;
-			for n=sphaInds
+            for n=sphaInds
 				% Add all spatially varying spherical harmonic terms
 				bfunc = obj.basisFuncSphHarm(n);
-				phs = phs + bfunc .* phs_spha_a(n, 1, :, :);
-			end
-			for n=1:size(phs_conc_a,1)
+                phs_a = bfunc .* phs_spha_a(n, 1, :, :);
+                if n>4 && ~isempty(obj.b0mask)
+                    phs_a = phs_a.*obj.b0mask;
+                end
+				phs = phs + phs_a;
+            end
+            for n=1:size(phs_conc_a,1)
 				% Add all concomitant gradient terms
 				bfunc = obj.basisFuncConcGrad(n);
-				phs = phs + bfunc .* phs_conc_a(n, 1, :, :);
-			end
-			phs = phs + obj.b0.*sampTimes_a;
-            if ~isempty(obj.b0mask)
-                phs = phs.*obj.b0mask;
+                phs_a = bfunc .* phs_conc_a(n, 1, :, :);
+                if ~isempty(obj.b0mask)
+                    phs_a = phs_a.*obj.b0mask;
+                end
+				phs = phs + phs_a;
             end
+            phs_a = obj.b0.*sampTimes_a;
+            if ~isempty(obj.b0mask)
+                phs_a = phs_a.*obj.b0mask;
+            end
+			phs = phs + phs_a;
 			kbase = phs;
 		end
 		

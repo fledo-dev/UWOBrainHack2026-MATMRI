@@ -17,6 +17,7 @@ function setPath
   addpath([topPath, 'bview']);
   addpath([topPath, 'demos']);
   addpath([topPath, 'general']);
+  addpath([topPath, 'iterativeSolvers']);
   addpath([topPath, 'operators']);
   addpath([topPath, 'simulation']);
   addpath([topPath, 'trajectory']);
