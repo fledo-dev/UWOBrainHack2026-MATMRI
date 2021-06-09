@@ -77,6 +77,7 @@ classdef sampHighOrder
         phs_grid = []; % Struct with fields phs_grid.X, phs_grid.Y, phs_grid.Z. Each must have dimensions equivalent to b0. MUST be in magnet frame.
 		sampTimes = []; % sec
 		kbase = []; % spatial part of spherical harmonics that is multiplied with phs_spha or phs_conc terms
+        phiDiv = []; % temporal derivative of kbase. Can be used to find global delays. TODO: give DOI
 		traj = [];		  % Precomputed values for interpolated approach
         svdSpace = [];    % Precomputed values for interpolated approach
         svdTime = [];     % Precomputed values for interpolated approach
@@ -163,7 +164,7 @@ classdef sampHighOrder
 			if obj.useInterp
                 [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft] = prepForInterp(obj);
 			else
-				obj.kbase = prepForDirect(obj);
+				obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
 			end
 		end
 
@@ -205,6 +206,9 @@ classdef sampHighOrder
                         y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
 					end
 				else
+                    if ~isempty(obj.phiDiv)
+                        error('phiDiv not yet implemented for interpolated approach')
+                    end
 					for l = 1:size(obj.svdSpace,2)
                         y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
                         y_a = obj.traj*y_a;
@@ -221,6 +225,10 @@ classdef sampHighOrder
 					y = sum(y,4);
 				else
 					y = x.*exp(1i*obj.kbase);
+                    if ~isempty(obj.phiDiv)
+                        y = 1i*y;
+                        y = obj.phiDiv.*y;
+                    end
 					y = sum(y,1);
 					y = sum(y,2);
 					y = reshape(y, obj.kSize);
@@ -233,14 +241,16 @@ classdef sampHighOrder
 			end
 		end
 
-		function kbase = prepForDirect(obj,sphaInds)
-            if nargin<2 || isempty(sphaInds)
+		function kbase = prepForDirect(obj,phs_spha_a,phs_conc_a,sampTimes_a,sphaInds)
+            if nargin<5 || isempty(sphaInds)
                 sphaInds = 1:size(obj.phs_spha,1);
             end
 			% Move all time dims to enable implicit replication when multiplying spatial dims by time dims
-			sampTimes_a = permute(obj.sampTimes, [length(obj.kSize)+1:length(obj.kSize)+obj.NDim 1:length(obj.kSize)]);
-			phs_spha_a = permute(obj.phs_spha, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
-			phs_conc_a = permute(obj.phs_conc, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
+            if numel(sampTimes_a) > 1
+			    sampTimes_a = permute(sampTimes_a, [length(obj.kSize)+1:length(obj.kSize)+obj.NDim 1:length(obj.kSize)]);
+            end
+			phs_spha_a = permute(phs_spha_a, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
+			phs_conc_a = permute(phs_conc_a, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
 			% Precompute spatial variation at all times (high memory demand, but very fast)
             phs = 0;
             for n=sphaInds
@@ -261,13 +271,29 @@ classdef sampHighOrder
                 end
 				phs = phs + phs_a;
             end
-            phs_a = obj.b0.*sampTimes_a;
-            if ~isempty(obj.b0mask)
-                phs_a = phs_a.*obj.b0mask;
+            if numel(sampTimes_a)>1
+                phs_a = obj.b0.*sampTimes_a;
+                if ~isempty(obj.b0mask)
+                    phs_a = phs_a.*obj.b0mask;
+                end
+                phs = phs + phs_a;
             end
-			phs = phs + phs_a;
 			kbase = phs;
 		end
+
+        function obj = setPhiDiv(obj,ksphaDiv,kconcDiv)
+            % ksphaDiv and kconcDiv are temporal derivatives of obj.phs_spha and obj.phs_conc
+            if obj.useSingle
+                ksphaDiv = single(ksphaDiv);
+				kconcDiv = single(kconcDiv);
+			end
+            % Move variables to GPU
+			if obj.useGPU
+				ksphaDiv = gpuArray(ksphaDiv);
+				kconcDiv = gpuArray(kconcDiv);
+			end
+            obj.phiDiv = prepForDirect(obj,ksphaDiv,kconcDiv,1);
+        end
 		
 		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
 			% Create nufft object
@@ -321,7 +347,7 @@ classdef sampHighOrder
 			traj = nufftOp(size(obj.b0), kloc');
 			clear kloc
 			% Determine full non-linear encoding matrix
-			b = prepForDirect(obj,[1,4:size(obj.phs_spha,1)]);
+			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
 			b = reshape(b, numel(obj.b0), numel(obj.sampTimes));
             % Sub-sample b along time dimension to speed up svd, since
             % phase is slowly varying in time. We do not subsample in
@@ -362,7 +388,7 @@ classdef sampHighOrder
 			% Compute error wrt direct approach
 			if (0)
 				erVal = gather(svdSpace)*gather(svdTime.');
-				b = prepForDirect(obj,[1,4:size(obj.phs_spha,1)]);
+				b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
 				b = reshape(b, numel(obj.b0), numel(obj.sampTimes));
                 b = exp(1i*b);
                 erVal = erVal(:) - gather(b(:));
