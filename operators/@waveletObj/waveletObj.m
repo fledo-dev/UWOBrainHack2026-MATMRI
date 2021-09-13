@@ -303,14 +303,14 @@ classdef waveletObj
                         end
                     end
                     wavplot = abs(wavplot);
-                    imagesc(wavplot);
+                    imagesc(gather(wavplot));
                     colormap('gray'); axis off; axis image;
                 case 3
                     % Plot slices in two orthogonal dimensions. Use subplot per level
                     wavplot = cat(1, obj.low(:,:,round(end/2)+1), permute(squeeze(obj.low(round(end/2)+1,:,:)), [2 1]) );
                     subplot(length(obj.high)+1,1,1)
                     wavplot = abs(wavplot);
-                    imagesc(wavplot), colormap('gray')
+                    imagesc(gather(wavplot)), colormap('gray')
                     axis off; axis image;
                     
                     np = 2;
@@ -319,7 +319,7 @@ classdef waveletObj
                         wavplot = cat(1, wavplot(:,:,round(end/2)+1), permute(squeeze(wavplot(round(end/2)+1,:,:)), [2 1]));
                         wavplot = abs(wavplot);
                         subplot(length(obj.high)+1,1,np)
-                        imagesc(wavplot), colormap('gray')
+                        imagesc(gather(wavplot)), colormap('gray')
                         axis off; axis image;
                         np = np+1;
                     end

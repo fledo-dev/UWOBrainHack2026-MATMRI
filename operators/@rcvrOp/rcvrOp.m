@@ -58,7 +58,7 @@ classdef rcvrOp
             obj.imgN = size(input);
             % Check if gpu is possible
             if ~(gpuDeviceCount>0) && obj.useGPU
-                warning('No GPU detected. Using CPU.')
+                warning('No GPU detected or GPU not supported. Using CPU.')
                 obj.useGPU = 0;
             elseif ~isa(input,'gpuArray')
                 input = gpuArray(input);

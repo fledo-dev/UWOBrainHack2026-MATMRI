@@ -1,6 +1,9 @@
 function y = mtimes(obj,x)
 
   if ~xor(obj.adjoint, obj.inverse)   %(0,0), (1,1)
+    if obj.useGPU
+      x = gpuArray(x);
+    end
     reg2 = [];
     if ~isempty(obj.AFcn)
       if obj.inverse
@@ -18,6 +21,9 @@ function y = mtimes(obj,x)
       if obj.inverse
         y = obj.AHAinvFcn(y,obj.APrep);
       end
+    end
+    if obj.useGPU
+      y = gather(y);
     end
   end
 

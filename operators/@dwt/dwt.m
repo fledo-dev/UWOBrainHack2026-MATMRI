@@ -21,6 +21,7 @@ properties
   Hi_D = [];
   Lo_R = [];
   Hi_R = [];
+  useGPU=1;
 end
 
 methods
@@ -31,13 +32,19 @@ methods
         APrep = [];
       end
       if nargin<5
-        useGPUFlag = 0;
+        useGPUFlag = 1;
       end
       if nargin<4
         family = 'db1';
       end
       if nargin<3
         decimation = false;
+      end
+      % Check if gpu is possible
+      obj.useGPU = useGPUFlag;
+      if ~(gpuDeviceCount>0) && obj.useGPU
+        warning('No GPU detected or GPU not supported. Using CPU.')
+        obj.useGPU = 0;
       end
 
       J(imSize==1) = 0; % Don't try to do convolution along size 1 dims
@@ -58,15 +65,15 @@ methods
       obj.imSize = imSize;
 
       obj.family = family;
-      if useGPUFlag
-        obj = useGPU(obj);
+      if obj.useGPU
+        obj = prepGPU(obj);
       end
       obj.AFcn = AFcn;
       obj.AHAinvFcn = AHAinvFcn;
       obj.APrep = APrep;
   end
 
-  function obj = useGPU(obj)
+  function obj = prepGPU(obj)
     if iscell(obj.Lo_D)
       for n1 = 1:size(obj.Lo_D,1)
         for n2 = 1:size(obj.Lo_D,2)
