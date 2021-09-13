@@ -6,7 +6,6 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     %
     %   A must have a transpose that can be evaluated using A'*b, or as a function with A(b,'transp')
     %   A operates on x via A*x or A(x,'notransp')
-    %   x0 and output of Ain are expected to be Nx1 vectors
     %
     % (c) Corey Baron
     %
@@ -103,7 +102,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     xold = x0;
     res = b - A(A(xold, 'notransp'), 'transp');
     p = res;
-    res_sq_old = res' * res;
+    res_sq_old = res(:)' * res(:);
     nit = 0;
     if opt.plotting
         nf = figure;
@@ -134,7 +133,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     lastxdifInc = 0; % consider sequential climbing xdiff as a single increase
     while ~finished
         Ap = A(A(p, 'notransp'), 'transp');
-        alph = res_sq_old / (p' * Ap);
+        alph = res_sq_old / (p(:)' * Ap(:));
         x = xold + alph*p;
         if mod(nit,opt.expResN) == 0
             % Avoid accumulation of rounding errors when doing many iterations
@@ -144,7 +143,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
             res = res - alph*Ap;
             betaFact = 1;
         end
-        res_sq_new = res' * res;
+        res_sq_new = res(:)' * res(:);
         resSqAll(nit+2) = res_sq_new; 
         if findxnorm
             xnormAll(nit+2) = x(:)'*x(:);
