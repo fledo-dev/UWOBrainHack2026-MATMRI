@@ -3,11 +3,20 @@ function maxEig = powermethod(Ain,x0,NitMax,doAtA,xdiffThresh)
 % A or the matrix A'*A. The latter case is the default. The input A can be
 % a function handle.
 
+if nargin<1
+    unitTest;
+    fprintf('Unit test successful!\n')
+    return;
+end
+
+if nargin<3 || isempty(NitMax)
+    NitMax = 50;
+end
 if nargin<4 || isempty(doAtA)
     doAtA = 1;
 end
 if nargin<5 || isempty(xdiffThresh)
-    xdiffThresh = 1e-5;
+    xdiffThresh = 1e-3;
 end
 
 % Account for different ways of supplying A
@@ -26,7 +35,7 @@ x_prev = x0;
 % Iteratively find eigenvector associated with maximum eigenvalue
 while ~finished
     if doAtA
-        x = A(A(x,'transp'),'notransp');
+        x = A(A(x,'notransp'),'transp');
     else
         x = A(x,'notransp');
     end
@@ -47,10 +56,38 @@ end
 
 % Use Rayleigh quotient to find eigenvalue
 if doAtA
-    AtAx = A(A(x,'transp'),'notransp');
+    AtAx = A(A(x,'notransp'),'transp');
 else
     AtAx = A(x,'notransp');
 end
 maxEig = x(:)' * AtAx(:) / (x(:)'*x(:));
 
+end
+
+function y = Asub(x,transp,Ain)
+    if strcmp(transp,'notransp')
+        y = Ain*x;
+    else
+        y = Ain'*x;
+    end
+end
+
+function unitTest
+    thresh = 1e-3;
+    sz = [8,5];
+    Ain = randn(sz) + 1i*randn(sz);
+    x0 = randn(sz(2),1);
+    e = eig(Ain'*Ain);
+    eTrue = max(e);
+    ePowM = powermethod(Ain,x0);
+    assert(abs(eTrue-ePowM)/abs(eTrue) < thresh, 'Powermethod doAtA=1 test failed.')
+    %
+    sz = [5,8];
+    Ain = randn(sz) + 1i*randn(sz);
+	Ain = Ain'*Ain;
+    x0 = randn(sz(2),1);
+    e = eig(Ain);
+    eTrue = max(e);
+    ePowM = powermethod(Ain,x0,[],0);
+    assert(abs(eTrue-ePowM)/abs(eTrue) < thresh, 'Powermethod doAtA=0 test failed.')
 end
