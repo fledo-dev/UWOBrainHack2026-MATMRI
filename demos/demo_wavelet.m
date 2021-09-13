@@ -39,3 +39,9 @@ isDec = 0;
 W = dwt(levelsPerDim,size(im),isDec);
 wim = W*im;
 figure; imagesc(wim); 
+
+NitMax = 30;
+x0 = [];
+[x, resSqAll, RxAll, mseAll] = bfista(opFunc,data,W,x0,NitMax);
+
+

@@ -15,11 +15,6 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
     % (c) Corey Baron
     %
     
-    warning('TODO: revisit GPU use for dwt class')
-    % TODO: implement softthresh function
-    % TODO: should probably implement wavelet class, so that softthresh,
-    % abs, (:), etc can be overloaded. 
-    
     % Set options
     if nargin<5 || isempty(NitMax)
         % Maximum number of iterations allowed
@@ -61,9 +56,10 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
     if ~isempty(opt.maxEig)
         maxEig = opt.maxEig;
     else
+        fprintf('Finding maximum eigenvalue of A''A using power method...\n')
         maxEig = powermethod(A,x0);
     end
-    stepSz = 0.9/(2*maxEig);
+    stepSz = 0.9/(2*abs(maxEig));
 
     % Initialize
     y = x0;
