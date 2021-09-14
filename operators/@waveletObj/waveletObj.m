@@ -59,6 +59,20 @@ classdef waveletObj
             end
         end
         
+        function obj2 = gather(obj)
+            obj2.low = gather(obj.low);
+            for i = 1:length(obj.high)
+                for m = 1:length(obj.high{i})
+                    obj2.high{i}{m} = gather(obj.high{i}{m});
+                end
+            end
+            if ~isempty(obj.extra)
+                obj2.extra = sign(obj.extra);
+            else
+                obj2.extra = [];
+            end
+        end
+        
         function obj = uminus(obj) % -w
             obj.low = -obj.low;
             for i = 1:length(obj.high)
@@ -89,14 +103,14 @@ classdef waveletObj
                 obj = mtimes(obj,alpha);
             elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
                 % case wavelet * wavelet
-                obj.low = alpha.low * obj.low;
+                obj.low = alpha.low .* obj.low;
                 for i = 1:length(obj.high)
                     for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = alpha.high{i}{m} * obj.high{i}{m};
+                        obj.high{i}{m} = alpha.high{i}{m} .* obj.high{i}{m};
                     end
                 end
                 if ~isempty(obj.extra)
-                    obj.extra = alpha.extra * obj.extra;
+                    obj.extra = alpha.extra .* obj.extra;
                 end
             end
         end
@@ -164,32 +178,8 @@ classdef waveletObj
         end
         
         function obj = minus(alpha,obj)
-            if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
-                % case scalar * wavelet
-                obj.low = minus(alpha, obj.low);
-                for i = 1:length(obj.high)
-                    for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = minus(alpha, obj.high{i}{m});
-                    end
-                end
-                if ~isempty(obj.extra)
-                    obj.extra = minus(alpha, obj.extra);
-                end
-            elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
-                % case wavelet * scalar
-                obj = minus(obj,alpha);
-            elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
-                % case wavelet * wavelet
-                obj.low = minus(alpha.low, obj.low);
-                for i = 1:length(obj.high)
-                    for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = minus(alpha.high{i}{m}, obj.high{i}{m});
-                    end
-                end
-                if ~isempty(obj.extra)
-                    obj.extra = minus(alpha.extra, obj.extra);
-                end
-            end
+            obj = -obj;
+            obj = alpha + obj;
         end
         
         function obj = plus(alpha,obj)
@@ -257,68 +247,70 @@ classdef waveletObj
         
         function wavplot = imagesc(obj)
             % Determine if decimated
-            isDec = any(size(obj.low) ~= size(obj.high{1}{1}));
-            obj = abs(obj);
-            switch ndims(obj.low)
+            obj2 = waveletObj(gather(obj));
+            isDec = any(size(obj2.low) ~= size(obj2.high{1}{1}));
+            obj2 = abs(obj2);
+            switch ndims(obj2.low)
                 case 1
                     error('TODO: define 1D wavelet plot');
                 case 2
                     if isDec
-                        wavplot = obj.low;
+                        wavplot = obj2.low;
                         % Determine levels
                         J = [1 1];
-                        for j=2:length(obj.high)
-                            J = J + (size(obj.high{j}{1}) < size(obj.high{j-1}{1}));
+                        for j=2:length(obj2.high)
+                            J = J + (size(obj2.high{j}{1}) < size(obj2.high{j-1}{1}));
                         end
-                        if length(obj.high{2})<3
+                        if length(obj2.high{2})<3
                             % Wavelet level for one dim must be 0
                             [~,minInd] = min(J);
                             J(minInd) = 0;
                         end
-                        for j=length(obj.high):-1:1
+                        for j=length(obj2.high):-1:1
                             % Loop through levels
                             if J(1) >= j
-                                wavplot = cat(1,wavplot,obj.high{j}{1});
+                                wavplot = cat(1,wavplot,obj2.high{j}{1});
                             end
                             sub = [];
                             if all(J>=j)
-                                sub = cat(1,obj.high{j}{2},obj.high{j}{3});
+                                sub = cat(1,obj2.high{j}{2},obj2.high{j}{3});
                             elseif J(2) >= j
-                                sub = obj.high{j}{1};
+                                sub = obj2.high{j}{1};
                             end
                             wavplot = cat(2,wavplot,sub);
                         end
                     else
                         ml = 1;
-                        for j=length(obj.high):-1:1
-                            ml = max(ml,length(obj.high{j}));
+                        for j=length(obj2.high):-1:1
+                            ml = max(ml,length(obj2.high{j}));
                         end
-                        wavplot = cat(2,obj.low,zeros([size(obj.low,1) (ml-1)*size(obj.low,2)]));
-                        for j=length(obj.high):-1:1
-                            sub = cell2mat(obj.high{j});
-                            if length(obj.high{j}) < ml
-                                sub = cat(2,sub, zeros([size(obj.low,1) (ml-length(obj.high{j}))*size(obj.low,2)]));
+                        wavplot = cat(2,obj2.low,zeros([size(obj2.low,1) (ml-1)*size(obj2.low,2)]));
+                        for j=length(obj2.high):-1:1
+                            sub = cell2mat(obj2.high{j});
+                            if length(obj2.high{j}) < ml
+                                sub = cat(2,sub, zeros([size(obj2.low,1) (ml-length(obj2.high{j}))*size(obj2.low,2)]));
                             end
                             wavplot = cat(1,wavplot,sub);
                         end
                     end
                     wavplot = abs(wavplot);
-                    imagesc(gather(wavplot));
+                    imagesc(wavplot);
                     colormap('gray'); axis off; axis image;
+                    colorbar;
                 case 3
                     % Plot slices in two orthogonal dimensions. Use subplot per level
-                    wavplot = cat(1, obj.low(:,:,round(end/2)+1), permute(squeeze(obj.low(round(end/2)+1,:,:)), [2 1]) );
-                    subplot(length(obj.high)+1,1,1)
+                    wavplot = cat(1, obj2.low(:,:,round(end/2)+1), permute(squeeze(obj2.low(round(end/2)+1,:,:)), [2 1]) );
+                    subplot(length(obj2.high)+1,1,1)
                     wavplot = abs(wavplot);
                     imagesc(gather(wavplot)), colormap('gray')
                     axis off; axis image;
                     
                     np = 2;
-                    for j=length(obj.high):-1:1
-                        wavplot = cell2mat(obj.high{j});
+                    for j=length(obj2.high):-1:1
+                        wavplot = cell2mat(obj2.high{j});
                         wavplot = cat(1, wavplot(:,:,round(end/2)+1), permute(squeeze(wavplot(round(end/2)+1,:,:)), [2 1]));
                         wavplot = abs(wavplot);
-                        subplot(length(obj.high)+1,1,np)
+                        subplot(length(obj2.high)+1,1,np)
                         imagesc(gather(wavplot)), colormap('gray')
                         axis off; axis image;
                         np = np+1;

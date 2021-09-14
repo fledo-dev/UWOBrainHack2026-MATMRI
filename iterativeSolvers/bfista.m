@@ -1,4 +1,4 @@
-function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
+function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     % Use balanced FISTA to solve argmin(||Ax-b||^2_2 + lam*||Rx||_1)  
     %
     % x = fista(Ain,bin,Rin,x0,NitMax,options)
@@ -16,23 +16,23 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
     %
     
     % Set options
-    if nargin<5 || isempty(NitMax)
+    if nargin<6 || isempty(NitMax)
         % Maximum number of iterations allowed
         NitMax = 100;
     end
-    if nargin<6 || ~isfield(opt,'maxEig')
+    if nargin<7 || ~isfield(opt,'maxEig')
         % Maximum eigenvalue of A'A
         opt.maxEig = []; 
     end
-    if nargin<6 || ~isfield(opt,'plotting')
+    if nargin<7 || ~isfield(opt,'plotting')
         % Show plots of progress
         opt.plotting = 0; 
     end
-    if nargin<6 || ~isfield(opt,'plottingReshape')
+    if nargin<7 || ~isfield(opt,'plottingReshape')
         % Reshape x for plotting images. Only 2D matrix allowed.
         opt.plottingReshape = []; 
     end
-    if nargin<6 || ~isfield(opt,'gtruth')
+    if nargin<7 || ~isfield(opt,'gtruth')
         % Useful for simulations. Allows computation of mse per iteration
         opt.gtruth = []; 
     end
@@ -56,8 +56,10 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
     if ~isempty(opt.maxEig)
         maxEig = opt.maxEig;
     else
-        fprintf('Finding maximum eigenvalue of A''A using power method...\n')
+        fprintf('Finding maximum eigenvalue of A''A using power method...')
+        tic1 = tic;
         maxEig = powermethod(A,x0);
+        fprintf('took %d sec\n', round(toc(tic1)));
     end
     stepSz = 0.9/(2*abs(maxEig));
 
@@ -79,7 +81,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
     end
     if nargout > 2
         l1norm = abs(Rin*x0);
-        RxAll(1) = sum(l1norm(:));
+        RxAll(1) = gather(sum(l1norm(:)));
     end
     if (nargout > 3) && ~isempty(opt.gtruth)
         tmp = opt.gtruth(:)-x0(:);
@@ -126,7 +128,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,x0,NitMax,opt)
             % (e.g., undecimated wavelet xform), which is why we have to
             % re-evalue the transform
             l1norm = abs(Rin*x);
-            RxAll(nit) = sum(l1norm(:));
+            RxAll(nit) = gather(sum(l1norm(:)));
         end
         if (nargout > 3) && ~isempty(opt.gtruth)
             tmp = opt.gtruth(:)-x(:);

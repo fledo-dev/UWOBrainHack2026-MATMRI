@@ -21,7 +21,7 @@ properties
   Hi_D = [];
   Lo_R = [];
   Hi_R = [];
-  useGPU=1;
+  useGPU=1;    % Does NOT gather back from GPU after decomposition. This makes for time savings in iterative methods that have a recon shortly after a decomp
 end
 
 methods
