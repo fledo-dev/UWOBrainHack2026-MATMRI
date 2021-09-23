@@ -84,6 +84,7 @@ classdef sampHighOrder
         phsShft = [];
 		kSize = [];
 		imSize = [];
+        trajFromRaw = [];
 	end
 
 	methods
@@ -92,6 +93,11 @@ classdef sampHighOrder
 			if nargin == 0
 				obj.tests;
 				return;
+            end
+            if isstruct(b0)
+                % Overloaded for computing trajectory from raw
+                obj.trajFromRaw = obj.computeTraj(b0.probe_positions,b0.probe_raw,b0.gammaProbes,b0.gammaMRI,b0.dt,b0.B0,b0.fieldOffsets,b0.coilParams,b0.nonLinSphHarm,b0.fitOrder);
+                return;
             end
             if nargin>5
 				obj.b0mask = b0mask;
