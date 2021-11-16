@@ -16,6 +16,7 @@ function setPath
   % Add paths
   addpath([topPath, 'bview']);
   addpath([topPath, 'demos']);
+  addpath([topPath, 'findDel']);
   addpath([topPath, 'general']);
   addpath([topPath, 'iterativeSolvers']);
   addpath([topPath, 'operators']);
