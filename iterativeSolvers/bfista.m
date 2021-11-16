@@ -18,19 +18,15 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     % Set options
     if nargin<6 || isempty(NitMax)
         % Maximum number of iterations allowed
-        NitMax = 100;
+        NitMax = 200;
     end
     if nargin<7 || ~isfield(opt,'maxEig')
         % Maximum eigenvalue of A'A
         opt.maxEig = []; 
     end
-    if nargin<7 || ~isfield(opt,'plotting')
-        % Show plots of progress
-        opt.plotting = 0; 
-    end
-    if nargin<7 || ~isfield(opt,'plottingReshape')
-        % Reshape x for plotting images. Only 2D matrix allowed.
-        opt.plottingReshape = []; 
+    if nargin<7 || ~isfield(opt,'resThresh')
+        % Threhold for residuals (to automatically stop iterations)
+        opt.resThresh = 1e-4; 
     end
     if nargin<7 || ~isfield(opt,'gtruth')
         % Useful for simulations. Allows computation of mse per iteration
@@ -56,7 +52,8 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     if ~isempty(opt.maxEig)
         maxEig = opt.maxEig;
     else
-        fprintf('Finding maximum eigenvalue of A''A using power method...')
+        warning('No opt.maxEig provided (recommended to precompute for a sample slice and input with opt.maxEig, since value should be similar for all slices of a single acquisition')
+        fprintf('bfista.m: finding maximum eigenvalue of A''A using power method...')
         tic1 = tic;
         maxEig = powermethod(A,x0);
         fprintf('took %d sec\n', round(toc(tic1)));
@@ -66,7 +63,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     % Initialize
     y = x0;
     resSqAll = zeros(NitMax+1,2);
-    RxAll = zeros(NitMax+1,1);
+    RxAll = zeros(NitMax+1,2);
     mseAll = zeros(NitMax+1,1);
     if ~isempty(opt.gtruth)
         tmp = opt.gtruth(:)-x0(:);
@@ -75,13 +72,13 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     
     % Get first points for tracking convergence of residuals
     if nargout > 1
-        warning('Residual output is requested. This DRASTICALLY increases computation time, and should only be done for development/debugging')
+        warning('Residual output is requested. This DRASTICALLY increases computation time, and should only be done for demos/development/debugging')
         residual = A(x0,'notransp')-bin;
         resSqAll(1,1) = residual(:)'*residual(:);
     end
     if nargout > 2
-        l1norm = abs(Rin*x0);
-        RxAll(1) = gather(sum(l1norm(:)));
+        l1norm = abs(lam*(Rin*x0));
+        RxAll(1,1) = gather(sum(l1norm(:)));
     end
     if (nargout > 3) && ~isempty(opt.gtruth)
         tmp = opt.gtruth(:)-x0(:);
@@ -96,9 +93,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     while ~finished
         % Find gradient for ||Ax-b||^2_2
         residual_y = A(y,'notransp')-bin;
-        if nargout>1
-            resSqAll(nit,2) = residual_y(:)'*residual_y(:);
-        end
+        resSqAll(nit,2) = residual_y(:)'*residual_y(:);
         grad = 2*A(residual_y,'transp');
         
         % Perform the step along the gradient (this is just simple gradient decent)
@@ -115,20 +110,22 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         %   Note that Rin'*Rin = I must be true for this case. This is
         %   true for both the decimated and undecimated wavelet tranform.
         x = Rin*g;
+        tmp = abs(lam*x);
+        RxAll(nit,2) = gather(sum(tmp(:)));
         x = softthresh(x,lam*stepSz); 
         x = Rin'*x;
         
         % Update tracking
         if nargout > 1
-            residual = A(y,'notransp')-bin;
+            residual = A(x,'notransp')-bin;
             resSqAll(nit,1) = residual(:)'*residual(:);
         end
         if nargout > 2
             % Note that Rin'*Rin = I does NOT ensure that Rin*Rin' = I
             % (e.g., undecimated wavelet xform), which is why we have to
             % re-evalue the transform
-            l1norm = abs(Rin*x);
-            RxAll(nit) = gather(sum(l1norm(:)));
+            l1norm = abs(lam*(Rin*x));
+            RxAll(nit,1) = gather(sum(l1norm(:)));
         end
         if (nargout > 3) && ~isempty(opt.gtruth)
             tmp = opt.gtruth(:)-x(:);
@@ -142,18 +139,27 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         % Update vars
         t_prev = t;
         x_prev = x;
-        nit = nit+1;
         
         % Check for completion
         if nit >= NitMax
+            fprintf('bfista: stopped on NitMax after %d iterations\n', nit)
             finished = 1;
         end
+        if nit>1
+            testVal = abs((resSqAll(nit,2)-resSqAll(nit-1,2))/resSqAll(nit-1,2)) +...
+                abs((RxAll(nit,2)-RxAll(nit-1,2))/RxAll(nit-1,2));
+        end
+        if (nit>1) && testVal<opt.resThresh
+            fprintf('bfista: stopped on opt.resThresh after %d iterations\n', nit)
+            finished = 1;
+        end
+        nit = nit+1;
     end
 
     % Clean up
-    resSqAll = resSqAll(1:(nit+1));
-    RxAll = RxAll(1:(nit+1));
-    mseAll = mseAll(1:(nit+1));
+    resSqAll = resSqAll(1:nit,:);
+    RxAll = RxAll(1:nit,:);
+    mseAll = mseAll(1:nit,:);
     
 end
 
