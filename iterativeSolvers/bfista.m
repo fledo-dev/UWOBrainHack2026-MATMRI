@@ -52,7 +52,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     if ~isempty(opt.maxEig)
         maxEig = opt.maxEig;
     else
-        warning('No opt.maxEig provided (recommended to precompute for a sample slice and input with opt.maxEig, since value should be similar for all slices of a single acquisition')
+        warning('No opt.maxEig provided (recommended to precompute for a sample slice and input with opt.maxEig, since value should be similar for all slices of a single acquisition)')
         fprintf('bfista.m: finding maximum eigenvalue of A''A using power method...')
         tic1 = tic;
         maxEig = powermethod(A,x0);
@@ -142,7 +142,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         
         % Check for completion
         if nit >= NitMax
-            fprintf('bfista: stopped on NitMax after %d iterations\n', nit)
+            fprintf('bfista.m: stopped on NitMax after %d iterations\n', nit)
             finished = 1;
         end
         if nit>1
