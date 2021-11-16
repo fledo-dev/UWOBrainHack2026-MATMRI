@@ -7,7 +7,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     %   A must have a transpose that can be evaluated using A'*b, or as a function with A(b,'transp')
     %   A operates on x via A*x or A(x,'notransp')
     %
-    % (c) Corey Baron
+    % (c) Corey Baron 2020
     %
     
     % Set options

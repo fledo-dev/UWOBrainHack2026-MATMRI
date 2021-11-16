@@ -2,6 +2,8 @@ function maxEig = powermethod(Ain,x0,NitMax,doAtA,xdiffThresh)
 % Use the power method to find the largest eigenvalue of either the matrix
 % A or the matrix A'*A. The latter case is the default. The input A can be
 % a function handle.
+% 
+% (c) Corey Baron 2021
 
 if nargin<1
     unitTest;

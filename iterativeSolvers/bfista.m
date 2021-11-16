@@ -12,7 +12,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     %       compressive recovery of highly accelerated cardiac cine MRI using
     %       the balanced sparse model. Magn Reson Med. 2017; 77: 1505-1515
     %
-    % (c) Corey Baron
+    % (c) Corey Baron 2021
     %
     
     % Set options
