@@ -3,15 +3,46 @@
 %  (c) Corey Baron, 2020
 
 % To make things simple, we'll start with actual acquired data for 
-% the field probe trajectories, B0 map, receiver sensitivity, and a ground
-% truth image
-load dataForDemonstrations.mat
+% the B0 map, receiver sensitivity, and a ground truth image
+load data_images.mat
 
-% Build sampling object
+% Pick a slice
+nsl = 2;
+X = X(:,:,nsl); 
+Y = Y(:,:,nsl); 
+Z = Z(:,:,nsl); 
+im0 = im0(:,:,nsl);
+b0map = b0map(:,:,nsl);
+Crcvr = Crcvr(:,:,nsl,:);
+
+% The receivers are actually virtual coils from coil compression, so we can
+% only use a subset to save time for the purposes of this demo.
+Crcvr = Crcvr(:,:,:,1:16);
+
+% Load a trajectory. Can choose between spiral or epi. 
+% The trajectory data was acquired at a dwell time of 1 us.
+% The datatime variable represents the sample times for a typical MRI
+% acquisition (dwell time = 2.5 us). 
+% dataStartTime is the time that data acquisition would start for each
+% trajectory (i.e., the field probe system began acquiring early)
+docase = 1;
+switch docase
+    case 0
+        load data_traj_epi_R3.mat
+        dataStartTime = 365;
+    case 1
+        load data_traj_spiral_R4.mat
+        dataStartTime = 50;
+end
+
+% Set spatial grid
 grid.x = X; 
 grid.y = Y;
 grid.z = Z;
-S = sampHighOrder(b0map,datatime,phs_spha',phs_conc',grid);
+
+% Interpolate trajectory samples to typical MRI sampling rate
+[phs_spha,phs_conc] = interpTrajTime(phs_spha,phs_conc,tdwelltraj,dataStartTime,datatime);
+S = sampHighOrder(b0map,datatime(:),phs_spha',phs_conc',grid);
 
 % Build receiver operator
 R = rcvrOp(Crcvr,0);
@@ -20,15 +51,15 @@ R = rcvrOp(Crcvr,0);
 data = S*(R*im0);
 
 % Add some noise
-ns_std = 5;
+ns_std = 1e-4;
 data = data + ns_std*(randn(size(data)) + 1i*randn(size(data)));
 
 
 %% Normal highorder recon using conjugate gradient method
 % Note that by default, cgne stops on the first iteration 
 opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
-maxIt = 30;
-opt.stopOnResInc = 1; % Stop on the first iteration where the residual increases, which turns out to be a pretty good criteria 
+maxIt = 25;
+opt.stopOnResInc = 0; 
 [im, resvec, mse, xnorm, xdiff] = cgne(opFunc,data,[],maxIt); 
 
 
@@ -62,7 +93,7 @@ imagesc(wim_zf); title('Wavelet transform of zero-filled');
 subplot(1,2,2)
 h = histogram(gather(abs(wim_zf.high{1}(:))),round(numel(wim_zf.high{1}(:))/100));
 title('Histogram of magnitude of 1st level of wavelet transform')
-xlim([0 20]);
+xlim([0 6e-4]);
 vals = h.Values;
 vals(1) = 0; % The first bin can be inflated if there was masking in im0
 [~,threshInd] = max(vals);
@@ -73,17 +104,17 @@ lambda.low = 0;
 % Do a few cgne iterations to get a better starting guess
 x0 = cgne(opFunc,data,[],2); 
 
-% Run the recon. Note that imCS has much less noise than im.
+% Run the recon. 
 NitMax = 200;
 opt.resThresh = 1e-4; % use fractional change in (||Ax-b||^2_2 + lambda*||Wx||_1) from last iteration to stop iterations
 opt_bfista.gtruth = im0; % For these sims, we know the ground truth and can thus track mean square error
 [imCS, resSqAll, RxAll, mseAll] = bfista(opFunc,data,W,lambda,x0,NitMax,opt_bfista);
 
-%% Plotting
+%% Plotting. Note that imCS has much less noise than im.
 figure;
-subplot(2,3,1); imagesc(permute(abs(im0),[2,1]),[0 600]); title('Ground truth'); axis('image'); axis('off'); colormap('gray');
-subplot(2,3,2); imagesc(permute(abs(im),[2,1]),[0 600]); title('Early stopping regularization'); axis('image'); axis('off'); colormap('gray');
-subplot(2,3,3); imagesc(permute(abs(imCS),[2,1]),[0 600]); title('Wavelet regularization'); axis('image'); axis('off'); colormap('gray');
+subplot(2,3,1); imagesc(permute(abs(im0),[2,1]),[0 0.006]); title('Ground truth'); axis('image'); axis('off'); colormap('gray');
+subplot(2,3,2); imagesc(permute(abs(im),[2,1]),[0 0.006]); title('Early stopping regularization'); axis('image'); axis('off'); colormap('gray');
+subplot(2,3,3); imagesc(permute(abs(imCS),[2,1]),[0 0.006]); title('Wavelet regularization'); axis('image'); axis('off'); colormap('gray');
 subplot(2,3,4); plot(log10(resSqAll(:,1))); ylabel('Data consistency'); xlabel('iterations');
 subplot(2,3,5); plot(log10(RxAll(:,1))); ylabel('Wavelet l1 norm'); xlabel('iterations');
 subplot(2,3,6); plot(log10(mseAll)); ylabel('Mean squared error'); xlabel('iterations');
