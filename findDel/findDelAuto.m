@@ -6,7 +6,8 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
     % Inputs:
     %   delSk0:     starting guess for delay
     %   data_in:    MRI raw data
-    %   tdwell:     dwell time for trajectory samples
+    %   tdwell:     dwell time for trajectory samples. Time for trajectory
+    %               is presumed to start at 0.
     %   phs_spha:   trajectory using a higher order encoding model. See
     %               sampHighOrder class in matmri repository
     %               (https://doi.org/10.5281/zenodo.4495477)

@@ -5,6 +5,8 @@ function [phs_spha,phs_conc] = interpTrajTime(phs_spha,phs_conc,tdwell_in,delTim
     %       subtracted from the times of the input signals)
     %    Output is at samples defined by datatime
     %
+    %   Time for trajectory input is presumed to start at 0.
+    %
     % (c) Corey Baron 2021
 
     trajTim = -delTime + tdwell_in*(0:size(phs_spha,1)-1); 
