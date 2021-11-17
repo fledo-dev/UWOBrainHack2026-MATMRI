@@ -19,12 +19,22 @@ Crcvr = Crcvr(:,:,nsl,:);
 % only use a subset to save time for the purposes of this demo.
 Crcvr = Crcvr(:,:,:,1:16);
 
-% Load a trajectory. Can choose between spiral or epi by changing which one
-% is commented. The trajectory data was acquired at a dwell time of 1 us.
+% Load a trajectory. Can choose between spiral or epi. 
+% The trajectory data was acquired at a dwell time of 1 us.
 % The datatime variable represents the sample times for a typical MRI
 % acquisition (dwell time = 2.5 us). 
-load data_traj_epi_R3.mat
-%load data_traj_spiral_R4.mat
+% dataStartTime is the time that data acquisition would start for each
+% trajectory (i.e., the field probe system began acquiring early)
+docase = 0;
+switch docase
+    case 0
+        load data_traj_epi_R3.mat
+        dataStartTime = 365;
+    case 1
+        load data_traj_spiral_R4.mat
+        dataStartTime = 50;
+end
+datatime = datatime + dataStartTime;
 
 % Set spatial grid
 grid.x = X; 
