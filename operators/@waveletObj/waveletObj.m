@@ -67,7 +67,7 @@ classdef waveletObj
                 end
             end
             if ~isempty(obj.extra)
-                obj2.extra = sign(obj.extra);
+                obj2.extra = gather(obj.extra);
             else
                 obj2.extra = [];
             end
@@ -117,64 +117,6 @@ classdef waveletObj
         
         function obj = times(alpha,obj) 
             obj = mtimes(alpha,obj);
-        end
-        
-        function obj = min(alpha,obj)
-            if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
-                % case scalar * wavelet
-                obj.low = min(alpha, obj.low);
-                for i = 1:length(obj.high)
-                    for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = min(alpha, obj.high{i}{m});
-                    end
-                end
-                if ~isempty(obj.extra)
-                    obj.extra = min(alpha, obj.extra);
-                end
-            elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
-                % case wavelet * scalar
-                obj = min(obj,alpha);
-            elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
-                % case wavelet * wavelet
-                obj.low = min(alpha.low, obj.low);
-                for i = 1:length(obj.high)
-                    for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = min(alpha.high{i}{m}, obj.high{i}{m});
-                    end
-                end
-                if ~isempty(obj.extra)
-                    obj.extra = min(alpha.extra, obj.extra);
-                end
-            end
-        end
-        
-        function obj = max(alpha,obj)
-            if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
-                % case scalar * wavelet
-                obj.low = max(alpha, obj.low);
-                for i = 1:length(obj.high)
-                    for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = max(alpha, obj.high{i}{m});
-                    end
-                end
-                if ~isempty(obj.extra)
-                    obj.extra = max(alpha, obj.extra);
-                end
-            elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
-                % case wavelet * scalar
-                obj = max(obj,alpha);
-            elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
-                % case wavelet * wavelet
-                obj.low = max(alpha.low, obj.low);
-                for i = 1:length(obj.high)
-                    for m = 1:length(obj.high{i})
-                        obj.high{i}{m} = max(alpha.high{i}{m}, obj.high{i}{m});
-                    end
-                end
-                if ~isempty(obj.extra)
-                    obj.extra = max(alpha.extra, obj.extra);
-                end
-            end
         end
         
         function obj = minus(alpha,obj)
@@ -242,6 +184,64 @@ classdef waveletObj
                 end
             else
                 out = builtin('subsref',obj,S);
+            end
+        end
+        
+        function obj = min(alpha,obj)
+            if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
+                % case scalar * wavelet
+                obj.low = min(alpha, obj.low);
+                for i = 1:length(obj.high)
+                    for m = 1:length(obj.high{i})
+                        obj.high{i}{m} = min(alpha, obj.high{i}{m});
+                    end
+                end
+                if ~isempty(obj.extra)
+                    obj.extra = min(alpha, obj.extra);
+                end
+            elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
+                % case wavelet * scalar
+                obj = min(obj,alpha);
+            elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
+                % case wavelet * wavelet
+                obj.low = min(alpha.low, obj.low);
+                for i = 1:length(obj.high)
+                    for m = 1:length(obj.high{i})
+                        obj.high{i}{m} = min(alpha.high{i}{m}, obj.high{i}{m});
+                    end
+                end
+                if ~isempty(obj.extra)
+                    obj.extra = min(alpha.extra, obj.extra);
+                end
+            end
+        end
+        
+        function obj = max(alpha,obj)
+            if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
+                % case scalar * wavelet
+                obj.low = max(alpha, obj.low);
+                for i = 1:length(obj.high)
+                    for m = 1:length(obj.high{i})
+                        obj.high{i}{m} = max(alpha, obj.high{i}{m});
+                    end
+                end
+                if ~isempty(obj.extra)
+                    obj.extra = max(alpha, obj.extra);
+                end
+            elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
+                % case wavelet * scalar
+                obj = max(obj,alpha);
+            elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
+                % case wavelet * wavelet
+                obj.low = max(alpha.low, obj.low);
+                for i = 1:length(obj.high)
+                    for m = 1:length(obj.high{i})
+                        obj.high{i}{m} = max(alpha.high{i}{m}, obj.high{i}{m});
+                    end
+                end
+                if ~isempty(obj.extra)
+                    obj.extra = max(alpha.extra, obj.extra);
+                end
             end
         end
         

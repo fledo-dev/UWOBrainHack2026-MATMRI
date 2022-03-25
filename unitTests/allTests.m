@@ -6,3 +6,4 @@ nufftOp;
 rcvrOp;
 mrSampFunc;
 sampHighOrder;
+dwt;

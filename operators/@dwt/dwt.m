@@ -26,6 +26,11 @@ end
 
 methods
   function  obj = dwt(J,imSize, decimation, family, useGPUFlag, AFcn, AHAinvFcn, APrep)    % constructor
+      if nargin<1
+          % Perform unit tests if no inputs
+          obj.tests;
+          return;
+      end
       if nargin<6
         AFcn = [];
         AHAinvFcn = [];
