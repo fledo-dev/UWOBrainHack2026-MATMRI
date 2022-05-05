@@ -37,9 +37,25 @@ if npc > 0
     inds2 = ~inds;
     inds2(dim) = false;
     % Finish padding
-    zpadding1 = zeros([sz(inds),floor(npc/2),sz(inds2)], 'like', x);
-    zpadding2 = zeros([sz(inds),npc-floor(npc/2),sz(inds2)], 'like', x);
-    y = cat(dim,zpadding1,x,zpadding2);
+    if (dim <= 3) && (ndims(x) < 11)
+        % Here we do a less computationally expensive approach for the most
+        % common cases
+        szx = [size(x),ones(1,5)];
+        if dim==1
+            y = zeros([szIn szx(2:end)], 'like', x);
+            y(floor(npc/2)+1:floor(npc/2)+szx(dim),:,:,:,:,:,:,:,:,:) = x;
+        elseif dim==2
+            y = zeros([szx(1) szIn szx(3:end)], 'like', x);
+            y(:,floor(npc/2)+1:floor(npc/2)+szx(dim),:,:,:,:,:,:,:,:) = x;
+        elseif dim==3
+            y = zeros([szx(1:2) szIn szx(4:end)], 'like', x);
+            y(:,:,floor(npc/2)+1:floor(npc/2)+szx(dim),:,:,:,:,:,:,:) = x;
+        end
+    else
+        zpadding1 = zeros([sz(inds),floor(npc/2),sz(inds2)], 'like', x);
+        zpadding2 = zeros([sz(inds),npc-floor(npc/2),sz(inds2)], 'like', x);
+        y = cat(dim,zpadding1,x,zpadding2);
+    end
 elseif npc<0
     npc = -npc;
     % Finish cropping

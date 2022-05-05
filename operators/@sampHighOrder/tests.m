@@ -154,7 +154,8 @@ im1 = S'*k0;
 cost = im1-im0; cost = sqrt(sum(cost(:).*conj(cost(:))))/numel(cost);
 assert(cost<1e-10, 'Inverse test failed');
 
-fprintf('Unit test success!\n')
+
+fprintf('sampHighOrder unit test success!\n')
 
 
 end

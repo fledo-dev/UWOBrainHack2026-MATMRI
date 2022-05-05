@@ -366,6 +366,8 @@ classdef nufftOp
                         end
                         for nD=1:length(obj.imgN)
                             % Zero-pad
+                            % TODO: for some reason this is strangely
+                            % expensive for GPU
                             y_a = padcrop(y_a,obj.osN(nD),nD);
                         end
                         y_a = ifftnc(y_a,length(obj.imgN),~obj.nofftShift);

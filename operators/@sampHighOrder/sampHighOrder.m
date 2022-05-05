@@ -41,10 +41,10 @@ classdef sampHighOrder
 %       are irrevelant to image recon (since there's no signal there).
 %   useGPU: whether to use GPU. Default = true.
 %   useSingle: if true, use single instead of double precision. Default =
-%       false. If set to true, memory savings will only be realized if the
-%       array that S operates on is also single.
+%       false. 
 %   useInterp: uses an interpolated approach. Always faster than direct
-%       approach on CPU, but not recommended for small matrix sizes on GPU.
+%       approach on CPU (i.e., when useGPU = 1). Not much benefit for GPU,
+%       unless not enough memory for direct approach. 
 %		See Wilm et al DOI: 10.1109/TMI.2012.2190991
 %   svdThresh (default = 0.05): trades off accuracy with speed when
 %       useInterp=1. Decrease to improve accuracy.
@@ -102,20 +102,55 @@ classdef sampHighOrder
             if nargin>5
 				obj.b0mask = b0mask;
             end
-			if nargin>6 && ~isempty(useGPU)
-				obj.useGPU = useGPU;
-            end
-            if nargin>7 && ~isempty(useSingle)
-				obj.useSingle = useSingle;
-			end
-			if nargin>8 && ~isempty(useInterp)
-				obj.useInterp = useInterp;
-            end
-            if nargin>9 && ~isempty(svdThresh)
-				obj.svdThresh = svdThresh;
-            end
-            if nargin>10 && ~isempty(subFact)
-				obj.subFact = subFact;
+            if nargin<6
+                % Determine options based on memory available
+                % Precomputations using GPU requires about 3.3 times numel(b0)*numel(sampTimes)*8 bytes of memory 
+                % After this calc, sampHighOrder object requires numel(b0)*numel(sampTimes)*8 bytes
+                % If the calc is successful, there is enough working memory to run
+                % multiplications with sampHighOrder object.
+                % To be safe, we allow for 4 times numel(b0)*numel(sampTimes)*8
+                if ~(gpuDeviceCount>0)
+                    obj.useGPU = 0;
+                    obj.useInterp = 1;
+                else
+                    G = gpuDevice;
+                    avMem = G.AvailableMemory;
+                    numbytes = numel(b0)*numel(sampTimes)*8;
+                    if numbytes < 0.25*avMem
+                        obj.useGPU = 1;
+                        obj.useSingle = 0;
+                        obj.useInterp = 0;
+                    elseif numbytes < 0.5*avMem
+                        obj.useGPU = 1;
+                        obj.useSingle = 1;
+                        obj.useInterp = 0;
+                    elseif (numel(b0)+numel(sampTimes))*50*8 < 0.25*avMem
+                        % This assumes less than 50 singular values
+                        obj.useGPU = 1;
+                        obj.useSingle = 0;
+                        obj.useInterp = 1;
+                    else
+                        obj.useGPU = 0;
+                        obj.useSingle = 0;
+                        obj.useInterp = 1;
+                    end
+                end
+            else
+                if nargin>6 && ~isempty(useGPU)
+                    obj.useGPU = useGPU;
+                end
+                if nargin>7 && ~isempty(useSingle)
+                    obj.useSingle = useSingle;
+                end
+                if nargin>8 && ~isempty(useInterp)
+                    obj.useInterp = useInterp;
+                end
+                if nargin>9 && ~isempty(svdThresh)
+                    obj.svdThresh = svdThresh;
+                end
+                if nargin>10 && ~isempty(subFact)
+                    obj.subFact = subFact;
+                end
             end
             if obj.subFact < 1
                 obj.subFact = 1;
@@ -136,7 +171,12 @@ classdef sampHighOrder
 			end
 			if length(obj.kSize)>obj.NDim || length(obj.imSize)>obj.NDim
 				error('Only up to %d dimensions allowed',obj.NDim);
-			end
+            end
+            % Check if gpu is possible
+            if ~(gpuDeviceCount>0) && obj.useGPU
+                warning('No GPU detected. Using CPU. To disable this warning, set option useGPU to 0')
+                obj.useGPU = 0;
+            end
 			obj.phs_conc = phs_conc;
             obj.phs_grid = phs_grid;
             if obj.NDim < 2
@@ -157,7 +197,7 @@ classdef sampHighOrder
                 obj.b0mask = single(obj.b0mask);
 			end
             % Move variables to GPU
-			if obj.useGPU
+			if obj.useGPU && ~obj.useInterp
 				obj.sampTimes = gpuArray(obj.sampTimes);
 				obj.phs_spha = gpuArray(obj.phs_spha);
 				obj.phs_conc = gpuArray(obj.phs_conc);
@@ -169,6 +209,11 @@ classdef sampHighOrder
 			end
 			if obj.useInterp
                 [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft] = prepForInterp(obj);
+                if obj.useGPU
+                    obj.svdTime = gpuArray(obj.svdTime);
+                    obj.svdSpace = gpuArray(obj.svdSpace);
+                    obj.phsShft = gpuArray(obj.phsShft);
+                end
 			else
 				obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
 			end
@@ -178,7 +223,8 @@ classdef sampHighOrder
 			szx = [size(x), 1, 1];
             if obj.useSingle
                 if (isa(x,'gpuArray') && ~isaUnderlying(x,'single')) || ~isa(x,'single')
-                    warning('useSingle specified, but input is not single.')
+                    warning('useSingle specified, but input is not single. Forcing to be single.')
+                    x = single(x);
                 end
             end
 
@@ -350,7 +396,7 @@ classdef sampHighOrder
                     obj.phs_grid.y(1,end/2+1)*obj.phs_spha(3,:);
             end
             phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
-			traj = nufftOp(size(obj.b0), kloc');
+			traj = nufftOp(size(obj.b0), kloc',[],obj.useGPU);
 			clear kloc
 			% Determine full non-linear encoding matrix
 			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
@@ -387,7 +433,6 @@ classdef sampHighOrder
             svdTime = conj(V(:,1:Ns)*S(1:Ns,1:Ns));
             if obj.subFact
                 svdTime = interp1(inds,gather(svdTime),1:inds(end),'pchip');
-                svdTime = gpuArray(svdTime);
             end
             svdSpace = U(:,1:Ns);
             clear U V
