@@ -1,12 +1,18 @@
-function bfunc = basisFuncSphHarm(obj,n)
+function bfunc = basisFuncSphHarm(obj,n,subInds)
     % Outputs basis function for index n of spherical harmonics
     % n = index of phs_spha in sampHighOrder.m
-    x = obj.phs_grid.x;
-    y = obj.phs_grid.y;
-    z = obj.phs_grid.z;
+    if (nargin > 2) && ~isempty(subInds)
+        x = obj.phs_grid.x(subInds(1):subInds(2));
+        y = obj.phs_grid.y(subInds(1):subInds(2));
+        z = obj.phs_grid.z(subInds(1):subInds(2));
+    else
+        x = obj.phs_grid.x;
+        y = obj.phs_grid.y;
+        z = obj.phs_grid.z;
+    end
     switch n
     case 1
-        bfunc = ones(size(x));
+        bfunc = ones(size(x), 'like', x);
     case 2
         bfunc = x;
     case 3                

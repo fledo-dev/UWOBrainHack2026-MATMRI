@@ -21,6 +21,12 @@ d1 = dot(x(:),Sy(:));
 d2 = dot(Sx(:),y(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
+% Confirm that method without precomputations is equivalent
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],0,[],[],1);
+Sx2 = S*x;
+Sy2 = S'*y;
+assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+
 %% Test interpolation. Use random polynomials to simulate slow variations
 kloc = projection(N0,N0-4,2);
 sampTimes = (1:size(kloc,1))';

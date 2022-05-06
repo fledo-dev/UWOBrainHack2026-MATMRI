@@ -64,6 +64,7 @@ classdef sampHighOrder
         useSingle = 0;
 		useGPU = 1;
 		useInterp = 0; 
+        noPrecomp = 0;
         svdThresh = 0.05; % Threshold for svd used in interpolated method
         subFact = 5;      % Factor to subsample in time by for interpolated approach
 	end
@@ -85,11 +86,14 @@ classdef sampHighOrder
 		kSize = [];
 		imSize = [];
         trajFromRaw = [];
+        noPrecompNdiv = [];
+        ksphaDiv = [];
+        kconcDiv = [];
 	end
 
 	methods
 
-		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFact)
+		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFact,noPrecomp)
 			if nargin == 0
 				obj.tests;
 				return;
@@ -124,15 +128,20 @@ classdef sampHighOrder
                         obj.useGPU = 1;
                         obj.useSingle = 1;
                         obj.useInterp = 0;
-                    elseif (numel(b0)+numel(sampTimes))*50*8 < 0.25*avMem
-                        % This assumes less than 50 singular values
-                        obj.useGPU = 1;
-                        obj.useSingle = 0;
-                        obj.useInterp = 1;
                     else
-                        obj.useGPU = 0;
-                        obj.useSingle = 0;
-                        obj.useInterp = 1;
+                        obj.useGPU = 1;
+                        obj.useSingle = 1;
+                        obj.useInterp = 0;
+                        obj.noPrecomp = 1;
+                        obj.noPrecompNdiv = ceil(numbytes / (0.2*avMem)); % 0.2 factor was determine heuristically
+                        if obj.noPrecompNdiv > max(numel(b0),numel(sampTimes))/4
+                            % Unlikely, but possible. Still use single,
+                            % because matrix size must be massive.
+                            obj.useGPU = 0;
+                            obj.useSingle = 1;
+                            obj.useInterp = 1;
+                            obj.noPrecomp = 0;
+                        end
                     end
                 end
             else
@@ -150,6 +159,10 @@ classdef sampHighOrder
                 end
                 if nargin>10 && ~isempty(subFact)
                     obj.subFact = subFact;
+                end
+                if nargin>11 && ~isempty(noPrecomp)
+                    obj.noPrecomp = noPrecomp;
+                    obj.noPrecompNdiv = 2;
                 end
             end
             if obj.subFact < 1
@@ -219,7 +232,7 @@ classdef sampHighOrder
                     obj.svdSpace = gpuArray(obj.svdSpace);
                     obj.phsShft = gpuArray(obj.phsShft);
                 end
-			else
+            elseif ~obj.noPrecomp
 				obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
 			end
 		end
@@ -275,20 +288,24 @@ classdef sampHighOrder
 				end
 			else
 				% Use direct model
-				if obj.adjoint
-					x = permute(x, [obj.NDim+1:obj.NDim+length(obj.kSize) 1:obj.NDim]);
-					y = x.*exp(-1i*obj.kbase);
-					y = sum(y,3);
-					y = sum(y,4);
-				else
-					y = x.*exp(1i*obj.kbase);
-                    if ~isempty(obj.phiDiv)
-                        y = 1i*y;
-                        y = obj.phiDiv.*y;
+                if obj.noPrecomp
+                    y = noPrecompWorker(obj,x);
+                else
+                    if obj.adjoint
+                        x = permute(x, [obj.NDim+1:obj.NDim+length(obj.kSize) 1:obj.NDim]);
+                        y = x.*exp(-1i*obj.kbase);
+                        y = sum(y,3);
+                        y = sum(y,4);
+                    else
+                        y = x.*exp(1i*obj.kbase);
+                        if ~isempty(obj.phiDiv)
+                            y = 1i*y;
+                            y = obj.phiDiv.*y;
+                        end
+                        y = sum(y,1);
+                        y = sum(y,2);
+                        y = reshape(y, obj.kSize);
                     end
-					y = sum(y,1);
-					y = sum(y,2);
-					y = reshape(y, obj.kSize);
                 end
                 
                 % Normalization so that a cartesian Fourier tranform would have
@@ -298,9 +315,64 @@ classdef sampHighOrder
 			end
 		end
 
-		function kbase = prepForDirect(obj,phs_spha_a,phs_conc_a,sampTimes_a,sphaInds)
+        function y = noPrecompWorker(obj,x)
+            y = 0;
+            Npnts = ceil(numel(x)/obj.noPrecompNdiv);
+            for nc = 1:obj.noPrecompNdiv
+                subinds1 = 1 + (nc-1)*Npnts;
+                subinds2 = min(Npnts + (nc-1)*Npnts, numel(x));
+                if subinds1 <= numel(x)
+                    x_sub = x(subinds1:subinds2);
+                    if obj.adjoint
+                        phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
+                            obj.sampTimes,[],[],[subinds1,subinds2]);
+                        x_sub = reshape(x_sub, [ones(1,length(obj.imSize)), numel(x_sub)]);
+                        tmp = x_sub .* exp(-1i*phs);
+                        y = y + sum(tmp,length(obj.imSize)+1);
+                    else
+                        phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
+                            obj.sampTimes,[],[subinds1,subinds2],[]);
+                        phs = reshape(phs, numel(x_sub), []);
+                        tmp = x_sub(:) .* exp(1i*phs);
+                        if ~isempty(obj.ksphaDiv)
+                            phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,...
+                                1,[],[subinds1,subinds2],[]);
+                            phiDiv_a = reshape(phiDiv_a, numel(x_sub), []);
+                            tmp = 1i*tmp;
+                            tmp = phiDiv_a.*tmp;
+                        end
+                        y = y + reshape(sum(tmp,1), obj.kSize);
+                    end
+                end
+            end
+        end
+
+		function kbase = prepForDirect(obj,phs_spha_a,phs_conc_a,sampTimes_a,sphaInds,subIndsSpace,subIndsTime)
             if nargin<5 || isempty(sphaInds)
                 sphaInds = 1:size(obj.phs_spha,1);
+            end
+            if nargin<6 || isempty(subIndsSpace)
+                subIndsSpace = [];
+            end
+            if nargin<7 || isempty(subIndsTime)
+                subIndsTime = [];
+            end
+            if ~isempty(subIndsTime)
+                phs_spha_a = phs_spha_a(:,subIndsTime(1):subIndsTime(2));
+                phs_conc_a = phs_conc_a(:,subIndsTime(1):subIndsTime(2));
+                if numel(sampTimes_a)>1
+                    sampTimes_a = sampTimes_a(subIndsTime(1):subIndsTime(2));
+                end
+            end
+            if ~isempty(subIndsSpace) 
+                if ~isempty(obj.b0mask)
+                    b0mask_a = obj.b0mask(subIndsSpace(1):subIndsSpace(2));
+                else
+                    b0mask_a = obj.b0mask;
+                end
+                b0_a = obj.b0(subIndsSpace(1):subIndsSpace(2));
+            else
+                b0_a = obj.b0;
             end
 			% Move all time dims to enable implicit replication when multiplying spatial dims by time dims
             if numel(sampTimes_a) > 1
@@ -312,26 +384,26 @@ classdef sampHighOrder
             phs = 0;
             for n=sphaInds
 				% Add all spatially varying spherical harmonic terms
-				bfunc = obj.basisFuncSphHarm(n);
+				bfunc = obj.basisFuncSphHarm(n,subIndsSpace);
                 phs_a = bfunc .* phs_spha_a(n, 1, :, :);
                 if n>4 && ~isempty(obj.b0mask)
-                    phs_a = phs_a.*obj.b0mask;
+                    phs_a = phs_a.*b0mask_a;
                 end
 				phs = phs + phs_a;
             end
             for n=1:size(phs_conc_a,1)
 				% Add all concomitant gradient terms
-				bfunc = obj.basisFuncConcGrad(n);
+				bfunc = obj.basisFuncConcGrad(n,subIndsSpace);
                 phs_a = bfunc .* phs_conc_a(n, 1, :, :);
                 if ~isempty(obj.b0mask)
-                    phs_a = phs_a.*obj.b0mask;
+                    phs_a = phs_a.*b0mask_a;
                 end
 				phs = phs + phs_a;
             end
             if numel(sampTimes_a)>1
-                phs_a = obj.b0.*sampTimes_a;
+                phs_a = b0_a.*sampTimes_a;
                 if ~isempty(obj.b0mask)
-                    phs_a = phs_a.*obj.b0mask;
+                    phs_a = phs_a.*b0mask_a;
                 end
                 phs = phs + phs_a;
             end
@@ -348,8 +420,13 @@ classdef sampHighOrder
 			if obj.useGPU
 				ksphaDiv = gpuArray(ksphaDiv);
 				kconcDiv = gpuArray(kconcDiv);
-			end
-            obj.phiDiv = prepForDirect(obj,ksphaDiv,kconcDiv,1);
+            end
+            if obj.noPrecomp
+                obj.ksphaDiv = ksphaDiv;
+                obj.kconcDiv = kconcDiv;
+            else
+                obj.phiDiv = prepForDirect(obj,ksphaDiv,kconcDiv,1);
+            end
         end
 		
 		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
