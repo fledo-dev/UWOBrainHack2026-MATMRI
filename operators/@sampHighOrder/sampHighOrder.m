@@ -155,6 +155,11 @@ classdef sampHighOrder
             if obj.subFact < 1
                 obj.subFact = 1;
             end
+            % Check for GPU support
+            if ~(gpuDeviceCount>0) && obj.useGPU
+                warning('No GPU detected or GPU not supported. Using CPU.')
+                obj.useGPU = 0;
+            end
 			obj.NDim = 2; % This class currently coded/optimized for 2D only
 			obj.b0 = b0;    
 			obj.imSize = size(b0);   
