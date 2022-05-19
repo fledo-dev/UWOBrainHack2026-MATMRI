@@ -106,7 +106,7 @@ classdef sampHighOrder
             if nargin>5
 				obj.b0mask = b0mask;
             end
-            if nargin<6
+            if nargin<6 || isempty(useGPU)
                 % Determine options based on memory available
                 % Precomputations using GPU requires about 3.3 times numel(b0)*numel(sampTimes)*8 bytes of memory 
                 % After this calc, sampHighOrder object requires numel(b0)*numel(sampTimes)*8 bytes
@@ -120,11 +120,11 @@ classdef sampHighOrder
                     G = gpuDevice;
                     avMem = G.AvailableMemory;
                     numbytes = numel(b0)*numel(sampTimes)*8;
-                    if numbytes < 0.25*avMem
+                    if numbytes < 0.2*avMem
                         obj.useGPU = 1;
                         obj.useSingle = 0;
                         obj.useInterp = 0;
-                    elseif numbytes < 0.5*avMem
+                    elseif numbytes < 0.4*avMem
                         obj.useGPU = 1;
                         obj.useSingle = 1;
                         obj.useInterp = 0;
@@ -276,7 +276,7 @@ classdef sampHighOrder
                         y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
 					end
 				else
-                    if ~isempty(obj.phiDiv)
+                    if ~isempty(obj.ksphaDiv)
                         error('phiDiv not yet implemented for interpolated approach')
                     end
 					for l = 1:size(obj.svdSpace,2)
@@ -298,9 +298,10 @@ classdef sampHighOrder
                         y = sum(y,4);
                     else
                         y = x.*exp(1i*obj.kbase);
-                        if ~isempty(obj.phiDiv)
+                        if ~isempty(obj.ksphaDiv)
                             y = 1i*y;
-                            y = obj.phiDiv.*y;
+                            phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
+                            y = phiDiv_a.*y;
                         end
                         y = sum(y,1);
                         y = sum(y,2);
@@ -411,22 +412,43 @@ classdef sampHighOrder
 		end
 
         function obj = setPhiDiv(obj,ksphaDiv,kconcDiv)
+            % Check memory again, since PhiDiv greatly increases memory
+            % demand.
+            G = gpuDevice;
+            avMem = G.AvailableMemory;
+            numbytes = numel(obj.b0)*numel(obj.sampTimes)*8;
+            if numbytes < 0.15*avMem
+                obj.useGPU = 1;
+                obj.useSingle = 0;
+                obj.useInterp = 0;
+            elseif numbytes < 0.3*avMem
+                obj.useGPU = 1;
+                obj.useSingle = 1;
+                obj.useInterp = 0;
+            else
+                obj.useGPU = 1;
+                obj.useSingle = 1;
+                obj.useInterp = 0;
+                obj.noPrecomp = 1;
+                obj.noPrecompNdiv = ceil(numbytes / (0.1*avMem));
+                obj.kbase = [];
+            end
             % ksphaDiv and kconcDiv are temporal derivatives of obj.phs_spha and obj.phs_conc
             if obj.useSingle
                 ksphaDiv = single(ksphaDiv);
 				kconcDiv = single(kconcDiv);
-			end
+            end
             % Move variables to GPU
 			if obj.useGPU
 				ksphaDiv = gpuArray(ksphaDiv);
 				kconcDiv = gpuArray(kconcDiv);
             end
-            if obj.noPrecomp
+            %if obj.noPrecomp
                 obj.ksphaDiv = ksphaDiv;
                 obj.kconcDiv = kconcDiv;
-            else
-                obj.phiDiv = prepForDirect(obj,ksphaDiv,kconcDiv,1);
-            end
+            %else
+            %    obj.phiDiv = prepForDirect(obj,ksphaDiv,kconcDiv,1);
+            %end
         end
 		
 		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
