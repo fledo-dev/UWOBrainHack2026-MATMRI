@@ -28,6 +28,11 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
         % https://doi-org.proxy1.lib.uwo.ca/10.3846/1392-6292.2007.12.61-70
         opt.nseThreshFact = 1.0; 
     end
+    if nargin<5 || ~isfield(opt,'nseExtraIt')
+        % Stopping on noise threshold seems to often stop a little too
+        % early, so we add some extra iterations.
+        opt.nseExtraIt = 4; 
+    end
     if nargin<5 || ~isfield(opt,'stopOnResInc')
         % Stop on nth iteration where ||res|| increases, where n is the
         % value that opt.stopOnResInc is set to. This works well for single
@@ -175,8 +180,15 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
             end
         end
         % Check if converged 
-        if (~isempty(stopThresh) && (res_sq_new < stopThresh)) || (res_sq_new/resSqAll(1) < 1e-10)
+        if (res_sq_new/resSqAll(1) < 1e-10)
+            % Here the residual is tiny
             finished = 1;
+        end
+        if (~isempty(stopThresh) && (res_sq_new < stopThresh)) 
+            % Here the residual dropped below the residual expected from
+            % noise.
+            NitMax = nit + opt.nseExtraIt;
+            stopThresh = 0;
         end
         if opt.stopOnResInc>0 && (resSqAll(nit+2)/resSqAll(nit+1) > opt.resIncThresh)
             resIncsTotal = resIncsTotal + 1;
