@@ -368,11 +368,12 @@ classdef sampHighOrder
             if ~isempty(subIndsSpace) 
                 if ~isempty(obj.b0mask)
                     b0mask_a = obj.b0mask(subIndsSpace(1):subIndsSpace(2));
-                else
-                    b0mask_a = obj.b0mask;
                 end
                 b0_a = obj.b0(subIndsSpace(1):subIndsSpace(2));
             else
+                if ~isempty(obj.b0mask)
+                    b0mask_a = obj.b0mask;
+                end
                 b0_a = obj.b0;
             end
 			% Move all time dims to enable implicit replication when multiplying spatial dims by time dims
