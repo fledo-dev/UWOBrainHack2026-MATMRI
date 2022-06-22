@@ -30,7 +30,15 @@ probe_raw = probe_raw .* exp(-1i*phsCor);
 
 % Prep. 
 phsRaw = unwrap(angle(probe_raw));
-magRaw = abs(probe_raw); % TODO: could use this for weighted least squares
+magRaw = abs(probe_raw); 
+
+% Weight probes based on lifetimes based on magnitude data. 
+%   The magnitude profiles are normalized based on the initial point, and
+%   then only the final 100 points are used to create the weight. Thus,
+%   those with shorter lifetimes will have smaller weights.
+W_mag = magRaw./magRaw(1,:,:,:,:);
+W_mag = mean(mean(W_mag(end-100:end,:,:),1),3);
+W_mag = W_mag(:)/max(W_mag);
 
 % Have the phase start at 0 for all probes
 phsRaw = phsRaw - phsRaw(1,:,:,:);
@@ -41,8 +49,24 @@ obj.phs_grid.y = probe_positions(:,2);
 obj.phs_grid.z = probe_positions(:,3);
 
 % Compute squared distance from isocenter, to be used for weighting
+% Using net distance from isocenter
 W = sum(probe_positions.^2,2);
+    % Other metrics to potentially try instead:
+    % Using sum of all distances from isocenter
+    %W = sum(abs(probe_positions),2).^2;
+    % Using max z-distance from isocenter
+    %W = probe_positions(:,3).^2;
+
 W = 1./W; % Closer probes should have larger weights
+%W = 0.01^2 + max(W) - W; % Closer probes should have larger weights. scale by 1 cm. TODO: this approach not sufficiently tested
+
+% Apply weights based on magnitude data (TODO: not sufficiently tested)
+W = W.*W_mag; 
+
+% Normalize weights
+W = W/max(W);
+
+% Apply weights to phase input
 if doWeights
     phsRaw = W(:)'.*phsRaw;
 end
@@ -52,6 +76,9 @@ Nc = 4;
 B = zeros(Nprobe, Nc);
 for l=1:Nc
     B(:,l) = obj.basisFuncConcGrad(l);
+end
+if doWeights
+    B = diag(W)*B;
 end
 
 % Set number of spherical harmonics
@@ -117,7 +144,7 @@ for nv = 1:size(phsRaw(:,:,:),3)
             phs_spha_a = pA*(phsRaw_a.' - phsRaw_conc - phs_pre);
             if (norder == 1) || ((Nla==1) && (Nl>=4))
                 linInds = (2:4) - Nla + 1;
-                phs_conc_a = -obj.computeMaxwellPhase(phs_spha_a(linInds,:).',dt,gammaProbes,coilParams,B0,nonLinSphHarm);
+                phs_conc_a = obj.computeMaxwellPhase(phs_spha_a(linInds,:).',dt,gammaProbes,coilParams,B0,nonLinSphHarm);
                 phsRaw_conc = B*(phs_conc_a.');
                 resid(n) = norm(reshape(A*phs_spha_a + B*(phs_conc_a.'),[],1) - phsRaw_a(:));
             end
