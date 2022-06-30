@@ -60,8 +60,8 @@ W = sum(probe_positions.^2,2);
 W = 1./W; % Closer probes should have larger weights
 %W = 0.01^2 + max(W) - W; % Closer probes should have larger weights. scale by 1 cm. TODO: this approach not sufficiently tested
 
-% Apply weights based on magnitude data (TODO: not sufficiently tested)
-W = W.*W_mag; 
+% Apply weights based on magnitude data 
+%W = W.*W_mag; % This worsened quality for DWI
 
 % Normalize weights
 W = W/max(W);
