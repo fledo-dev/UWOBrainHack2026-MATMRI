@@ -9,10 +9,32 @@ doWeights = 1;
 % Specify whether to build up the trajectory spherical harmonics in steps
 doSteps = 1;
 
+% Correct for probe field offsets
+times = (1:size(probe_raw,1))';
+phsCor = 2*pi*(gammaProbes*dt)*fieldOffsets(:)'.*times;
+probe_raw = probe_raw .* exp(-1i*phsCor);
+
+% Remove a probe if raw probe amplitude falls below threshold (default 0.1%) 
+% Probe magnitudes normalized based on the initial point
+probemag_thresh = 0.001; %default value based on testing, change if needed
+probe_raw_norm = abs(probe_raw)./abs(probe_raw(1,:,:,:,:));
+probe_index = 1:size(probe_positions,1);
+for nprobe = 1:size(probe_positions,1)
+    if any(probe_raw_norm(:,nprobe,1,1) < probemag_thresh)
+        remove_ind = nprobe;
+        probe_index(probe_index == remove_ind) = [];
+        warning('Probe %d removed from fit due to raw probe amplitude falling below threshold\n', nprobe)
+    end            
+end    
+probe_positions = probe_positions(probe_index,:);
+probe_raw = probe_raw(:,probe_index,:,:);
+    
 % Determine number of probes
 Nprobe = size(probe_positions,1);
 
-% Set defaults
+% Set defaults OR verify the designated fit order has the minimum number of probes needed.
+% If below the minimum probe requirement due to probe removal, set to appropriate fit
+% order based on number of available probes.
 if isempty(fitOrder)
     if Nprobe >= 16
         fitOrder = 3;
@@ -21,12 +43,22 @@ if isempty(fitOrder)
     else
         fitOrder = 1;
     end
-end
-
-% Correct for probe field offsets
-times = (1:size(probe_raw,1))';
-phsCor = 2*pi*(gammaProbes*dt)*fieldOffsets(:)'.*times;
-probe_raw = probe_raw .* exp(-1i*phsCor);
+else
+    if fitOrder == 3
+        if Nprobe < 16 & Nprobe >= 9
+            fitOrder = 2;
+            warning('Fit order set to %d since not enough probes for desired order selection', fitOrder)
+        elseif Nprobe < 9
+            fitOrder = 1;
+            warning('Fit order set to %d since not enough probes for desired order selection', fitOrder)
+        end
+    elseif fitOrder == 2
+        if Nprobe < 9
+            fitOrder = 1;
+            warning('Fit order set to %d since not enough probes for desired order selection', fitOrder)
+        end
+    end  
+end    
 
 % Prep. 
 phsRaw = unwrap(angle(probe_raw));
