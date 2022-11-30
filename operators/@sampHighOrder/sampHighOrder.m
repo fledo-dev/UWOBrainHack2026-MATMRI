@@ -78,7 +78,7 @@ classdef sampHighOrder
         phs_grid = []; % Struct with fields phs_grid.X, phs_grid.Y, phs_grid.Z. Each must have dimensions equivalent to b0. MUST be in magnet frame.
 		sampTimes = []; % sec
 		kbase = []; % spatial part of spherical harmonics that is multiplied with phs_spha or phs_conc terms
-        phiDiv = []; % temporal derivative of kbase. Can be used to find global delays. TODO: give DOI
+        phiDiv = []; % temporal derivative of kbase. Can be used to find global delays. See DOI: 10.1002/mrm.29460
 		traj = [];		  % Precomputed values for interpolated approach
         svdSpace = [];    % Precomputed values for interpolated approach
         svdTime = [];     % Precomputed values for interpolated approach
@@ -241,7 +241,7 @@ classdef sampHighOrder
 			szx = [size(x), 1, 1];
             if obj.useSingle
                 if (isa(x,'gpuArray') && ~isaUnderlying(x,'single')) || ~isa(x,'single')
-                    warning('useSingle specified, but input is not single. Forcing to be single.')
+                    %warning('useSingle specified, but input is not single. Forcing to be single.')
                     x = single(x);
                 end
             end

@@ -9,6 +9,10 @@ doWeights = 1;
 % Specify whether to build up the trajectory spherical harmonics in steps
 doSteps = 1;
 
+% Correct offsets. Try to use residual from linear fit to correct offsets
+corrOff = 1; % Whether to correct offsets
+NitCorr = 3; % How many iterations to use
+
 % Correct for probe field offsets
 times = (1:size(probe_raw,1))';
 phsCor = 2*pi*(gammaProbes*dt)*fieldOffsets(:)'.*times;
@@ -58,7 +62,12 @@ else
             warning('Fit order set to %d since not enough probes for desired order selection', fitOrder)
         end
     end  
-end    
+end  
+
+% Parameter checking.
+if (fitOrder ~= 2) && corrOff
+    warning('Field probe offset correction not recommended for fitOrder ~= 2.')
+end
 
 % Prep. 
 phsRaw = unwrap(angle(probe_raw));
@@ -81,26 +90,24 @@ obj.phs_grid.y = probe_positions(:,2);
 obj.phs_grid.z = probe_positions(:,3);
 
 % Compute squared distance from isocenter, to be used for weighting
-% Using net distance from isocenter
-W = sum(probe_positions.^2,2);
-    % Other metrics to potentially try instead:
-    % Using sum of all distances from isocenter
-    %W = sum(abs(probe_positions),2).^2;
-    % Using max z-distance from isocenter
-    %W = probe_positions(:,3).^2;
-
-W = 1./W; % Closer probes should have larger weights
-%W = 0.01^2 + max(W) - W; % Closer probes should have larger weights. scale by 1 cm. TODO: this approach not sufficiently tested
-
-% Apply weights based on magnitude data 
-%W = W.*W_mag; % This worsened quality for DWI
-
-% Normalize weights
-W = W/max(W);
-
-% Apply weights to phase input
+W = [];
 if doWeights
-    phsRaw = W(:)'.*phsRaw;
+    % Using net distance from isocenter
+    W = sum(probe_positions.^2,2);
+        % Other metrics to potentially try instead:
+        % Using sum of all distances from isocenter
+        %W = sum(abs(probe_positions),2).^2;
+        % Using max z-distance from isocenter
+        %W = probe_positions(:,3).^2;
+
+    W = 1./W; % Closer probes should have larger weights
+    %W = 0.01^2 + max(W) - W; % Closer probes should have larger weights. scale by 1 cm. TODO: this approach not sufficiently tested
+
+    % Apply weights based on magnitude data 
+    %W = W.*W_mag; % This worsened quality for DWI
+
+    % Normalize weights
+    W = W/max(W);
 end
 
 % Create matrix for maxwell terms basis functions
@@ -108,9 +115,6 @@ Nc = 4;
 B = zeros(Nprobe, Nc);
 for l=1:Nc
     B(:,l) = obj.basisFuncConcGrad(l);
-end
-if doWeights
-    B = diag(W)*B;
 end
 
 % Set number of spherical harmonics
@@ -124,10 +128,12 @@ end
 
 % Iterate between computing SphHarm and phase from conc grads
 Nit = 3;
+if ~corrOff
+    NitCorr = 1;
+end
 phs_spha = zeros(size(phsRaw,1),Nl,size(phsRaw,3),size(phsRaw,4),'like',phsRaw);
 phs_conc = zeros(size(phsRaw,1),Nc,size(phsRaw,3),size(phsRaw,4),'like',phsRaw);
 for nv = 1:size(phsRaw(:,:,:),3)
-    phsRaw_conc = 0;
     phsRaw_a = phsRaw(:,:,nv);
     if ~doSteps
         % Fit all the orders of spherical harmonics simultaneously
@@ -139,51 +145,58 @@ for nv = 1:size(phsRaw(:,:,:),3)
         % offcenter it will mess up the B0 estimation.
         norderAll = 1:fitOrder;
     end
-    % Initialize phase that is subtracted from raw phase after fitting
-    % lower orders 
-    phs_pre = 0; 
     % Loop through orders (required for "doSteps" option)
-    for norder_ind = 1:length(norderAll)
-        norder = norderAll(norder_ind);
-        % Set matrix equation for normal spherical harmonic expansion of trajectory
-        if norder == 3
-            Nla = 10;
-            Nl = 16;
-        elseif norder == 2
-            Nla = 5;
-            Nl = 9;
-        elseif norder == 1
-            Nla = 1;
-            Nl = 4;
-        else
-            error('Must choose order between 1 and 3')
-        end
-        if ~doSteps
-            % Here we need to do all orders at once, so we start from the
-            % first one (i.e., Nla=1) and go up to the one specified via
-            % norder above (i.e., Nl)
-            Nla = 1;
-        end
-        A = zeros(Nprobe, Nl-Nla+1);
-        for l=Nla:Nl
-            A(:,l-Nla+1) = obj.basisFuncSphHarm(l);
-        end
-        if doWeights
-            A = diag(W)*A;
-        end
-        pA = pinv(A);
-        for n=1:Nit
-            phs_spha_a = pA*(phsRaw_a.' - phsRaw_conc - phs_pre);
-            if (norder == 1) || ((Nla==1) && (Nl>=4))
-                linInds = (2:4) - Nla + 1;
-                phs_conc_a = obj.computeMaxwellPhase(phs_spha_a(linInds,:).',dt,gammaProbes,coilParams,B0,nonLinSphHarm);
-                phsRaw_conc = B*(phs_conc_a.');
-                resid(n) = norm(reshape(A*phs_spha_a + B*(phs_conc_a.'),[],1) - phsRaw_a(:));
+    for ncorr = 1:NitCorr
+        phsRaw_conc = 0;
+        % Initialize phase that is subtracted from raw phase after fitting
+        % lower orders 
+        phs_pre = 0; 
+        for norder_ind = 1:length(norderAll)
+            norder = norderAll(norder_ind);
+            % Set matrix equation for normal spherical harmonic expansion of trajectory
+            if norder == 3
+                Nla = 10;
+                Nl = 16;
+            elseif norder == 2
+                Nla = 5;
+                Nl = 9;
+            elseif norder == 1
+                Nla = 1;
+                Nl = 4;
+            else
+                error('Must choose order between 1 and 3')
             end
+            if ~doSteps
+                % Here we need to do all orders at once, so we start from the
+                % first one (i.e., Nla=1) and go up to the one specified via
+                % norder above (i.e., Nl)
+                Nla = 1;
+            end
+            A = zeros(Nprobe, Nl-Nla+1);
+            for l=Nla:Nl
+                A(:,l-Nla+1) = obj.basisFuncSphHarm(l);
+            end
+            phs_in = phsRaw_a.' - phs_pre;
+            if (Nla==1) && (Nl>=4)
+                [phs_spha_a, phs_conc_a, phsRaw_conc] = doFit(obj,A,B,phs_in,W,0,Nit,dt,gammaProbes,coilParams,B0,nonLinSphHarm);
+            else
+                phs_spha_a = doFit(obj,A,B,phs_in,W,phsRaw_conc);
+            end
+            phs_pre = phs_pre + A*(phs_spha_a);
+            resid_ord = phsRaw_a.' - phsRaw_conc - phs_pre;
+            % Save result into output
+            phs_spha(:,Nla:Nl,nv) = phs_spha_a.';
         end
-        phs_pre = phs_pre + A*(phs_spha_a);
-        % Save result into output
-        phs_spha(:,Nla:Nl,nv) = phs_spha_a.';
+        if corrOff
+            % Remove residual phase (large residuals are created by
+            % step-wise approach). These residuals represent errors from
+            % non-linearity / inhomogeneity of fields (gradient or, B0, or
+            % other eddy current modes)
+            % Perform a larger correction for probes at a further distance
+            W2 = 1./W;
+            W2 = W2/max(W2);
+            phsRaw_a = phsRaw_a - W2'.*(resid_ord');
+        end
     end
     phs_conc(:,:,nv) = phs_conc_a;
 end
@@ -195,6 +208,34 @@ traj.phs_spha = phs_spha * gammaMRI / gammaProbes;
 traj.phs_conc = phs_conc * gammaMRI / gammaProbes;
 
 
+end
+
+function [phs_spha_a, phs_conc_a, phsRaw_conc] = doFit(obj,A,B,phs_in,W,phsRaw_conc,Nit,dt,gammaProbes,coilParams,B0,nonLinSphHarm)
+    phs_conc_a = [];
+    if nargin < 7
+        doConc = 0;
+        Nit = 1;
+    else
+        doConc = 1;
+        phsRaw_conc = 0;
+    end
+    if ~isempty(W)
+        pA = pinv(diag(W)*A);
+    else
+        pA = pinv(A);
+    end
+    for n=1:Nit
+        if ~isempty(W)
+            phs_spha_a = pA*(W(:).*(phs_in - phsRaw_conc));
+        else
+            phs_spha_a = pA*(phs_in - phsRaw_conc);
+        end
+        if doConc
+            linInds = 2:4;
+            phs_conc_a = obj.computeMaxwellPhase(phs_spha_a(linInds,:).',dt,gammaProbes,coilParams,B0,nonLinSphHarm);
+            phsRaw_conc = B*(phs_conc_a.');
+        end
+    end
 end
 
 
