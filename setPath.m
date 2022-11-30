@@ -15,6 +15,7 @@ function setPath
 
   % Add paths
   addpath([topPath, 'bview']);
+  addpath([topPath, 'computeHarmonics']);
   addpath([topPath, 'demos']);
   addpath([topPath, 'findDel']);
   addpath([topPath, 'general']);

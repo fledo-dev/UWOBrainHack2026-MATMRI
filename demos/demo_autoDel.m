@@ -1,5 +1,10 @@
 %% demo for automatic determination of trajectory delay
-%  Manuscript under review
+%
+%  Cite:
+%
+%  Dubovan PI, Baron CA. Model-based determination of the synchronization
+%  delay between MRI and trajectory data. Magn Reson Med. 2022 Sep 26. doi:
+%  10.1002/mrm.29460.  PMID: 36161333.
 %
 %  (c) Corey Baron, 2021
 
