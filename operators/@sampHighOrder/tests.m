@@ -1,6 +1,8 @@
 function tests(obj)
 
 N0 = 128;
+useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
+useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
 
 %% Check adjoint for basic case
 imN = [N0 N0];
@@ -12,7 +14,7 @@ phs_coco = randn([4, size(sampTimes)]);
 phs_grid.x = randn(size(b0));
 phs_grid.y = randn(size(b0));
 phs_grid.z = randn(size(b0));
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],0);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
 x = randn(imN) + randn;
 y = randn(imk) + randn;
 Sx = S*x;
@@ -22,7 +24,7 @@ d2 = dot(Sx(:),y(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
 % Confirm that method without precomputations is equivalent
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],0,[],[],1);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
 Sx2 = S*x;
 Sy2 = S'*y;
 assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
@@ -82,7 +84,7 @@ for orient=1:4
     yvec = fftnc(xvec);
     yvec = yvec(1:numel(sampTimes));
     yvec = yvec(:);
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],0);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
     Sx = S*xvec;
     Sy = S'*yvec(:);
     %     tic1 = tic;
@@ -90,7 +92,7 @@ for orient=1:4
     %         Sx = S*x;
     %     end
     %     toc1 = toc(tic1)
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],1,0.01);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01);
     Sx_b = S*xvec;
     Sy_b = S'*yvec(:);
     d1 = dot(xvec(:),Sy_b(:));
@@ -121,7 +123,7 @@ phs_coco = randn([4, size(sampTimes)]);
 phs_grid.x = randn(size(b0));
 phs_grid.y = randn(size(b0));
 phs_grid.z = randn(size(b0));
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],0);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
 x = randn([imN, nExtra]) + randn;
 y = randn([imk, nExtra]) + randn;
 Sx = S*x;
@@ -131,7 +133,7 @@ d2 = dot(Sx(:),y(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
 %% Test single precision option
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],1,1,0);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,1,0);
 x = single(randn(imN) + randn);
 y = single(randn(imk) + randn);
 Sx = S*x;
@@ -151,7 +153,7 @@ phs_spha(2,:,:) = pi*2/N*repmat(-N/2:N/2-1, [N 1]);
 sampTimes = reshape(0:N^2-1, N, N);
 b0 = zeros(size(phs_grid.x));
 im0 = phantom(N);
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],[],[],0);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
 k0 = S*im0;
 k1 = fftnc(im0,2);
 cost = abs(k0)-abs(k1); cost = sqrt(sum(cost(:).*conj(cost(:))))/numel(cost);

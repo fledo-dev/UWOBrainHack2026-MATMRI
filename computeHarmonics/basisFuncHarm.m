@@ -46,7 +46,7 @@ function bfuncOut = basisFuncHarm(x,y,z,n,subInds)
         otherwise
             error('Basis function undefined.')
         end
-        bfuncOut(:,n_ind) = bfunc;
+        bfuncOut(:,n_ind) = bfunc(:);
     end
     bfuncOut = squeeze(reshape(bfuncOut,[szx,size(n)]));
 end
