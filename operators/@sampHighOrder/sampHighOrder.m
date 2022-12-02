@@ -54,7 +54,7 @@ classdef sampHighOrder
 %
 %
 %   Within the class, basis functions for each index of phs_spha and
-%   phs_conc are computed using basisFuncSphHarm and basisFuncConcGrad,
+%   phs_conc are computed using basisFuncHarm.m and basisFuncConc.m,
 %   respectively. 
 %
 %   (c) Corey Baron 2020
@@ -75,7 +75,7 @@ classdef sampHighOrder
         b0mask = [];
         phs_spha = []; % 0th, 1st, 2nd and 3rd order spherical harmonic terms for phase over time. Must have dimensions 16 x size(sampTimes). 
         phs_conc = []; % conc grad terms for phase over time. Must have dimensions 4 x size(sampTimes). 
-        phs_grid = []; % Struct with fields phs_grid.X, phs_grid.Y, phs_grid.Z. Each must have dimensions equivalent to b0. MUST be in magnet frame.
+        phs_grid = []; % Struct with fields phs_grid.x, phs_grid.x, phs_grid.x. Each must have dimensions equivalent to b0. MUST be in magnet frame.
 		sampTimes = []; % sec
 		kbase = []; % spatial part of spherical harmonics that is multiplied with phs_spha or phs_conc terms
         phiDiv = []; % temporal derivative of kbase. Can be used to find global delays. See DOI: 10.1002/mrm.29460
@@ -97,11 +97,6 @@ classdef sampHighOrder
 			if nargin == 0
 				obj.tests;
 				return;
-            end
-            if isstruct(b0)
-                % Overloaded for computing trajectory from raw
-                obj.trajFromRaw = obj.computeTraj(b0.probe_positions,b0.probe_raw,b0.gammaProbes,b0.gammaMRI,b0.dt,b0.B0,b0.fieldOffsets,b0.coilParams,b0.nonLinSphHarm,b0.fitOrder);
-                return;
             end
             if nargin>5
 				obj.b0mask = b0mask;
@@ -386,7 +381,7 @@ classdef sampHighOrder
             phs = 0;
             for n=sphaInds
 				% Add all spatially varying spherical harmonic terms
-				bfunc = obj.basisFuncSphHarm(n,subIndsSpace);
+                bfunc = basisFuncHarm(obj.phs_grid.x,obj.phs_grid.y,obj.phs_grid.z,n,subIndsSpace);
                 phs_a = bfunc .* phs_spha_a(n, 1, :, :);
                 if n>4 && ~isempty(obj.b0mask)
                     phs_a = phs_a.*b0mask_a;
@@ -395,7 +390,7 @@ classdef sampHighOrder
             end
             for n=1:size(phs_conc_a,1)
 				% Add all concomitant gradient terms
-				bfunc = obj.basisFuncConcGrad(n,subIndsSpace);
+                bfunc = basisFuncConc(obj.phs_grid.x,obj.phs_grid.y,obj.phs_grid.z,n,subIndsSpace);
                 phs_a = bfunc .* phs_conc_a(n, 1, :, :);
                 if ~isempty(obj.b0mask)
                     phs_a = phs_a.*b0mask_a;
