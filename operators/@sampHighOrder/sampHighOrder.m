@@ -267,7 +267,7 @@ classdef sampHighOrder
 					for l = 1:size(obj.svdSpace,2)
                         y_a = x.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
                         y_a = conj(obj.phsShft).*y_a;
-						y_a = obj.traj'*y_a;
+						y_a = obj.traj'*y_a(:);
                         y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
 					end
 				else
@@ -277,6 +277,7 @@ classdef sampHighOrder
 					for l = 1:size(obj.svdSpace,2)
                         y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
                         y_a = obj.traj*y_a;
+                        y_a = reshape(y_a, size(obj.sampTimes));
                         y_a = obj.phsShft.*y_a;
                         y = y + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
 					end
@@ -453,7 +454,8 @@ classdef sampHighOrder
 			% 1. have normal vector to slice as an optional input
 			% 2. find linear combination of terms 2:4 in kspha for in-plane to slice
 			% 3. set that to kloc, and substract from kspha. Then can still have all kspha terms in sum below
-            kloc = zeros(2,size(obj.phs_spha,2), 'like', obj.phs_spha);
+            sz_spha = size(obj.phs_spha);
+            kloc = zeros([2,sz_spha(2:end)], 'like', obj.phs_spha);
             if abs(obj.phs_grid.z(2,2)-obj.phs_grid.z(1,1)) ~= 0
                 error('non-axial slices not supported for interpolated approach')
             end
@@ -496,7 +498,7 @@ classdef sampHighOrder
                     obj.phs_grid.y(1,end/2+1)*obj.phs_spha(3,:);
             end
             phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
-			traj = nufftOp(size(obj.b0), kloc',[],obj.useGPU);
+			traj = nufftOp(size(obj.b0), kloc(:,:)',[],obj.useGPU);
 			clear kloc
 			% Determine full non-linear encoding matrix
 			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
