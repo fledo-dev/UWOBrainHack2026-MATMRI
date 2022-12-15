@@ -524,7 +524,15 @@ classdef sampHighOrder
                     error('many large singular values. Try providing mask or adjusting svdThresh.')
                 end
                 ntry = ntry + delTry;
+                if obj.useSingle
+                    b = double(b);
+                end
                 [U,S,V,FLAG] = svds(b,ntry,'largest','SubspaceDimension',subspcFact*ntry);
+                if obj.useSingle
+                    U = single(U);
+                    S = single(S);
+                    V = single(V);
+                end
                 if FLAG
                     warning('svd failure to converge. Increasing subspace.')
                     ntry = ntry - delTry;

@@ -101,6 +101,7 @@ for orient=1:4
     cost = Sx(:)-Sx_b(:);
     cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
     assert(cost < 1e-4, 'Interp comparison to direct failed.')
+    %
     %     tic2 = tic;
     %     for n=1:10
     %         Sx_b = S*x;
@@ -111,6 +112,21 @@ for orient=1:4
     %     subplot(2,3,3); imagesc(angle(reshape(Sx,N0,N0))); subplot(2,3,4); imagesc(angle(reshape(Sx_b,N0,N0)));
     %     subplot(2,3,5); imagesc(abs(reshape(Sx,N0,N0)-reshape(Sx_b,N0,N0))); colorbar;
 end
+% Test non-1D sampTimes for interp option
+S = sampHighOrder(b0,reshape(sampTimes,[],2),reshape(phs_spha,size(phs_spha,1),[],2),...
+    reshape(phs_coco,size(phs_coco,1),[],2),phs_grid,[],useGPU,useSingle,1,0.01);
+Sx_b2 = S*xvec;
+assert(sum(abs(Sx_b2(:)-Sx_b)) < 1e-8, 'Interp sampTimes ND test failed.')
+% Test single precision for interp option
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,1,1,0.01);
+Sx_b = S*xvec;
+Sy_b = S'*yvec(:);
+d1 = dot(xvec(:),Sy_b(:));
+d2 = dot(Sx_b(:),yvec(:));
+assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-5, 'Interp adjoint test failed.')
+assert(isa(Sx_b, 'single'), 'Interp single precision failed.')
+
+
 
 %% Check adjoint for larger im dims
 imN = [N0 N0];
@@ -140,6 +156,7 @@ Sx = S*x;
 Sy = S'*y;
 d1 = dot(x(:),Sy(:));
 d2 = dot(Sx(:),y(:));
+assert(isa(Sx, 'single'), 'Interp single precision output not single.')
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-5, 'Single test failed.')
 
 %% Test vs Fourier transform
