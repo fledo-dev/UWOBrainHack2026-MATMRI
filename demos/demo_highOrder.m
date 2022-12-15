@@ -66,6 +66,12 @@ b0 = linspace(0,1,N)'*8*pi/max(sampTimes(:));
 b0 = repmat(b0, [1 N]);
 
 % Build sampling object
+% Note: here we use a 2D array for sampTimes to keep the data format
+% analogous to the Cartesian EPI trajectory. sampTimes ca also be 1D
+% (with phs_spha and phs_conc 2D instead of 3D), which would be the typical
+% scenario for non-Cartesian acquisitions. One can make it 1D using
+% sampTimes(:) here too, and it should work fine (the data output would
+% become 1D for each receiver instead of being 2D as in this example)
 S = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,grid);
 
 % Create image. 
