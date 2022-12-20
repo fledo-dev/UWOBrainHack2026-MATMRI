@@ -166,7 +166,7 @@ end
 
 % Create matrix for maxwell terms basis functions
 Nc = 4;
-B = zeros(Nprobe, Nc);
+B = zeros(Nprobe, Nc, 'like', phsRaw);
 for l=1:Nc
     B(:,l) = basisFuncConc(probe_positions(:,1),probe_positions(:,2),probe_positions(:,3),l);
 end
@@ -217,7 +217,7 @@ for nv = 1:size(phsRaw(:,:,:),3)
                 % norder above (i.e., Nl)
                 Nla = 1;
             end
-            A = zeros(Nprobe, Nlb-Nla+1);
+            A = zeros(Nprobe, Nlb-Nla+1, 'like', phsRaw);
             for l=Nla:Nlb
                 basisIndex = opt.fitInds(l);
                 A(:,l-Nla+1) = basisFuncHarm(probe_positions(:,1),probe_positions(:,2),probe_positions(:,3),basisIndex);

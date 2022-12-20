@@ -26,7 +26,7 @@ end
 
 % Find compression matrix for each slice
 A = zeros(Nkeep,size(data,1),size(data,3), 'like', data);
-sv = zeros(size(data,1),size(data,3));
+sv = zeros(size(data,1),size(data,3), 'like', data);
 for nsl=1:size(data,3)
     [U,S,~] = svd(data(:,:,nsl),'econ');
     sv(:,nsl) = diag(S)/S(1,1);

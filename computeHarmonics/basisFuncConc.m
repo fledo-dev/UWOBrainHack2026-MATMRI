@@ -7,7 +7,7 @@ function bfunc = basisFuncConcGrad(x,y,z,n,subInds)
         z = z(subInds(1):subInds(2));
     end
     szx = size(x);
-    bfuncOut = zeros([numel(x),numel(n)]);
+    bfuncOut = zeros([numel(x),numel(n)],'like',x);
     for n_ind = 1:numel(n)
         n_a = n(n_ind);
         switch n_a
