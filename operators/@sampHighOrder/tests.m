@@ -4,30 +4,34 @@ N0 = 128;
 useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
 useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
 
-%% Check adjoint for basic case
-imN = [N0 N0];
-b0 = randn(imN) + rand;
-imk = [N0 1];
-sampTimes = randn(imk)/sqrt(prod(imk));
-phs_spha = randn([16, size(sampTimes)]);
-phs_coco = randn([4, size(sampTimes)]);
-phs_grid.x = randn(size(b0));
-phs_grid.y = randn(size(b0));
-phs_grid.z = randn(size(b0));
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
-x = randn(imN) + randn;
-y = randn(imk) + randn;
-Sx = S*x;
-Sy = S'*y;
-d1 = dot(x(:),Sy(:));
-d2 = dot(Sx(:),y(:));
-assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
+%% Check adjoint for basic case for 1D through 3D
+for nd = 1:3
+    imN = [round(N0^(2/nd))*ones(1,nd), 1];
+    imk = [round(N0^(1/nd))*ones(1,nd), 1];
+    b0 = randn(imN) + rand;
+    sampTimes = randn(imk)/sqrt(prod(imk));
+    phs_spha = randn([16, imk]);
+    phs_coco = randn([4, imk]);
+    phs_grid.x = randn(size(b0));
+    phs_grid.y = randn(size(b0));
+    phs_grid.z = randn(size(b0));
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
+    x = randn(imN) + randn;
+    y = randn(imk) + randn;
+    Sx = S*x;
+    Sy = S'*y;
+    d1 = dot(x(:),Sy(:));
+    d2 = dot(Sx(:),y(:));
+    assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
-% Confirm that method without precomputations is equivalent
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
-Sx2 = S*x;
-Sy2 = S'*y;
-assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+    % Confirm that method without precomputations is equivalent
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    Sx2 = S*x;
+    Sy2 = S'*y;
+    assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+    clear S
+end
 
 %% Test interpolation. Use random polynomials to simulate slow variations
 kloc = projection(N0,N0-4,2);
