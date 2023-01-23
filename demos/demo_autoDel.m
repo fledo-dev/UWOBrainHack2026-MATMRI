@@ -64,6 +64,7 @@ data = data + ns_std*(randn(size(data)) + 1i*randn(size(data)));
 %% Normal highorder recon using conjugate gradient method
 
 % Build sampling object based on trajectory with no delay
+fprintf('Performing recon with delay error...\n')
 [phs_spha_del0,phs_conc_del0] = interpTrajTime(phs_spha,phs_conc,tdwelltraj,0,datatime);
 S = sampHighOrder(b0map,datatime(:),phs_spha_del0',phs_conc_del0',grid);
 
@@ -73,6 +74,7 @@ opt.stopOnResInc = 0;
 [im, resvec, mse, xnorm, xdiff] = cgne(opFunc,data,[],maxIt); 
 
 % Find delay automatically
+fprintf('Finding delay...\n')
 del0 = 0; % starting guess 
 maxNit_cgne = length(resvec)-1;
 delJumpFact = 3;
@@ -81,12 +83,14 @@ numCoarseSearch = 0;
 fprintf('True delay = %.2f us. Found delay = %.2f us\n', delApplied, delFound);
 
 % Determine image with optimal delay
+fprintf('Performing recon with found delay...\n')
 [phs_spha_dela,phs_conc_dela] = interpTrajTime(phs_spha,phs_conc,tdwelltraj,delFound,datatime);
 S = sampHighOrder(b0map,datatime(:),phs_spha_dela',phs_conc_dela',grid);
 opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
 imFoundDel = cgne(opFunc,data,[],maxIt); 
 
 % Determine image with true delay
+fprintf('Performing recon with ground truth delay...\n')
 [phs_spha_del,phs_conc_del] = interpTrajTime(phs_spha,phs_conc,tdwelltraj,delApplied,datatime);
 S = sampHighOrder(b0map,datatime(:),phs_spha_del',phs_conc_del',grid);
 opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
