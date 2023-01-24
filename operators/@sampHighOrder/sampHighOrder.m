@@ -256,91 +256,68 @@ classdef sampHighOrder
 			if obj.adjoint
 				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
                 NdimIn = obj.NDimk;
-                NdimOut = obj.NDim;
 			else
 				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
                 NdimIn = obj.NDim;
-                NdimOut = obj.NDimk;
 			end
 			for n=1:prod(szx(NdimIn+1:end))
-                switch NdimIn
-                    case 1
-                        x_a = x(:,n);
-                    case 2
-                        x_a = x(:,:,n);
-                    case 3
-                        x_a = x(:,:,:,n);
-                    otherwise
-                        error('NdimIn not allowed');
+                % Loop through all the channels
+                x_a = subArray(obj, x, n);
+                if obj.useInterp
+                    y_a = useInterpWorker(obj,x_a);
+                elseif obj.useSegmented
+                    y_a = useSegmentedWorker(obj,x_a);
+                else
+                    y_a = useDirectWorker(obj,x_a);
                 end
-				if obj.useGPU && ~isa(x_a, 'gpuArray')
-					x_a = gpuArray(x_a);
-				end
-				y_a = applyModel(obj,x_a);
-				if ~isa(x,'gpuArray')
-					y_a = gather(y_a);
-				end
-                switch NdimOut
-                    case 1
-                        y(:,n) = y_a;
-                    case 2
-                        y(:,:,n) = y_a;
-                    case 3
-                        y(:,:,:,n) = y_a;
-                    otherwise
-                        error('NdimOut not allowed');
-                end
+                y = subArray(obj, y_a, n, y);
 			end
         end
 		
-		function y = applyModel(obj,x)
-			if obj.useInterp
-				% Use nufft's and interpolation
-				y = 0;
-				if obj.adjoint
-					for l = 1:size(obj.svdSpace,2)
-                        y_a = x.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
-                        y_a = conj(obj.phsShft).*y_a;
-						y_a = obj.traj'*y_a(:);
-                        y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
-					end
-				else
-                    if ~isempty(obj.ksphaDiv)
-                        error('phiDiv not yet implemented for interpolated approach')
-                    end
-					for l = 1:size(obj.svdSpace,2)
-                        y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
-                        y_a = obj.traj*y_a;
-                        y_a = reshape(y_a, size(obj.sampTimes));
-                        y_a = obj.phsShft.*y_a;
-                        y = y + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
-					end
-				end
-			else
-				% Use direct model
-                if obj.useSegmented
-                    y = useSegmentedWorker(obj,x);
-                else
-                    if obj.adjoint
-                        y = x(:).';
-                        y = y.*exp(-1i*obj.kbase);
-                        y = sum(y,2);
-                        y = reshape(y, [obj.imSize, 1]);
-                    else
-                        y = x(:).*exp(1i*obj.kbase);
-                        if ~isempty(obj.ksphaDiv)
-                            y = 1i*y;
-                            phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
-                            y = phiDiv_a.*y;
-                        end
-                        y = sum(y,1);
-                        y = reshape(y, [obj.kSize, 1]);
-                    end
+		function y = useInterpWorker(obj,x)
+            % Use nufft's and interpolation
+            y = 0;
+            if obj.adjoint
+                for l = 1:size(obj.svdSpace,2)
+                    y_a = x.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
+                    y_a = conj(obj.phsShft).*y_a;
+                    y_a = obj.traj'*y_a(:);
+                    y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
                 end
-                % Normalization so that a cartesian Fourier transform would have
-                    % the adjoint equal to the inverse
-                y = y/sqrt(prod(obj.imSize));
-			end
+            else
+                if ~isempty(obj.ksphaDiv)
+                    error('phiDiv not yet implemented for interpolated approach')
+                end
+                for l = 1:size(obj.svdSpace,2)
+                    y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
+                    y_a = obj.traj*y_a;
+                    y_a = reshape(y_a, size(obj.sampTimes));
+                    y_a = obj.phsShft.*y_a;
+                    y = y + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
+                end
+            end
+        end
+        
+        function y = useDirectWorker(obj,x)
+            % Use direct model
+            if obj.adjoint
+                y = x(:).';
+                y = y.*exp(-1i*obj.kbase);
+                y = sum(y,2);
+                y = reshape(y, [obj.imSize, 1]);
+            else
+                y = x(:).*exp(1i*obj.kbase);
+                if ~isempty(obj.ksphaDiv)
+                    y = 1i*y;
+                    phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
+                    y = phiDiv_a.*y;
+                end
+                y = sum(y,1);
+                y = reshape(y, [obj.kSize, 1]);
+            end
+            % Normalization so that a cartesian Fourier transform would have
+                % the adjoint equal to the inverse
+            y = y/sqrt(prod(obj.imSize));
 		end
 
         function y = useSegmentedWorker(obj,x)
@@ -387,6 +364,9 @@ classdef sampHighOrder
                     end
                 end
             end
+            % Normalization so that a cartesian Fourier transform would have
+                % the adjoint equal to the inverse
+            y = y/sqrt(prod(obj.imSize));
         end
         
         function [SegNpnts,SegNpntsAdj,SegPhs] = prepForSegmented(obj)
@@ -650,6 +630,45 @@ classdef sampHighOrder
         function  res = ctranspose(obj)
             obj.adjoint = xor(obj.adjoint,1);
             res = obj;
+        end
+        
+        function out = subArray(obj, x, n, out)
+            if obj.adjoint
+                NdimIn = obj.NDimk;
+                NdimOut = obj.NDim;
+            else
+                NdimIn = obj.NDim;
+                NdimOut = obj.NDimk;
+            end
+            if (nargin < 4) || isempty(out)
+                switch NdimIn
+                    case 1
+                        out = x(:,n);
+                    case 2
+                        out = x(:,:,n);
+                    case 3
+                        out = x(:,:,:,n);
+                    otherwise
+                        error('NdimIn not allowed');
+                end
+                if obj.useGPU && ~isa(out, 'gpuArray')
+                    out = gpuArray(out);
+                end
+            else
+                if ~isa(out,'gpuArray')
+                    out_a = gather(x);
+                end
+                switch NdimOut
+                    case 1
+                        out(:,n) = out_a;
+                    case 2
+                        out(:,:,n) = out_a;
+                    case 3
+                        out(:,:,:,n) = out_a;
+                    otherwise
+                        error('NdimOut not allowed');
+                end
+            end
         end
         
 	end
