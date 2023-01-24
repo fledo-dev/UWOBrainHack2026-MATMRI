@@ -16,17 +16,22 @@ for nd = 1:3
     phs_grid.y = randn(size(b0));
     phs_grid.z = randn(size(b0));
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
-    x = randn(imN) + randn;
-    y = randn(imk) + randn;
+    x = randn([imN,2]) + randn; % include repetitions for multichannel inputs
+    y = randn([imk,2]) + randn; % include repetitions for multichannel inputs
     Sx = S*x;
     Sy = S'*y;
     d1 = dot(x(:),Sy(:));
     d2 = dot(Sx(:),y(:));
     assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
-    % Confirm that method without precomputations is equivalent
+    % Confirm that segmented approach is equivalent
     clear S
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    Sx2 = S*x;
+    Sy2 = S'*y;
+    assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
     Sx2 = S*x;
     Sy2 = S'*y;
     assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
