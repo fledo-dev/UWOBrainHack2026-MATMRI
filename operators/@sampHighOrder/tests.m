@@ -29,7 +29,7 @@ for nd = 1:3
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
     Sx2 = S*x;
     Sy2 = S'*y;
-    assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+    assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Segmented test failed.')
     clear S
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
     Sx2 = S*x;

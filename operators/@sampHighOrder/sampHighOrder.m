@@ -239,13 +239,16 @@ classdef sampHighOrder
                 end
             elseif ~obj.useSegmented
 				obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
-            elseif obj.useSegmented == 1
-                [obj.SegNpnts,obj.SegNpntsAdj,obj.SegPhs] = prepForSegmented(obj);
+            elseif obj.useSegmented 
+                obj.SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
+                obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
+                if obj.useSegmented == 1
+                    obj.SegPhs = prepForSegmented(obj);
+                end
 			end
 		end
 
-		function y = mtimes(obj,x)
-			szx = [size(x), 1, 1];
+		function y = mtimes(obj,x)			
             if obj.useSingle
                 if (isa(x,'gpuArray') && ~isaUnderlying(x,'single')) || ~isa(x,'single')
                     %warning('useSingle specified, but input is not single. Forcing to be single.')
@@ -253,114 +256,155 @@ classdef sampHighOrder
                 end
             end
 
-			if obj.adjoint
+            % Choose method (all should give the same result, but with
+            % different trade-offs in terms of speed, memory usage, and
+            % accuracy (only obj.useInterp can reduce accuracy)
+            if obj.useInterp
+                y = useInterpWorker(obj,x);
+            elseif obj.useSegmented
+                y = useSegmentedWorker(obj,x);
+            else
+                y = useDirectWorker(obj,x);
+            end
+        end
+		
+		function y = useInterpWorker(obj,x)
+            % Use nufft's and interpolation
+            szx = [size(x), 1, 1];
+            if obj.adjoint
 				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
                 NdimIn = obj.NDimk;
 			else
 				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
                 NdimIn = obj.NDim;
-			end
-			for n=1:prod(szx(NdimIn+1:end))
-                % Loop through all the channels
+            end
+            for n=1:prod(szx(NdimIn+1:end))    
                 x_a = subArray(obj, x, n);
-                if obj.useInterp
-                    y_a = useInterpWorker(obj,x_a);
-                elseif obj.useSegmented
-                    y_a = useSegmentedWorker(obj,x_a);
+                if obj.adjoint 
+                    y_b = 0;
+                    for l = 1:size(obj.svdSpace,2)
+                        y_a = x_a.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
+                        y_a = conj(obj.phsShft).*y_a;
+                        y_a = obj.traj'*y_a(:);
+                        y_b = y_b + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
+                    end
                 else
-                    y_a = useDirectWorker(obj,x_a);
+                    if ~isempty(obj.ksphaDiv)
+                        error('phiDiv not yet implemented for interpolated approach')
+                    end
+                    y_b = 0;
+                    for l = 1:size(obj.svdSpace,2)
+                        y_a = x_a.*reshape(obj.svdSpace(:,l),size(obj.b0));
+                        y_a = obj.traj*y_a;
+                        y_a = reshape(y_a, size(obj.sampTimes));
+                        y_a = obj.phsShft.*y_a;
+                        y_b = y_b + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
+                    end
                 end
-                y = subArray(obj, y_a, n, y);
-			end
-        end
-		
-		function y = useInterpWorker(obj,x)
-            % Use nufft's and interpolation
-            y = 0;
-            if obj.adjoint
-                for l = 1:size(obj.svdSpace,2)
-                    y_a = x.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
-                    y_a = conj(obj.phsShft).*y_a;
-                    y_a = obj.traj'*y_a(:);
-                    y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
-                end
-            else
-                if ~isempty(obj.ksphaDiv)
-                    error('phiDiv not yet implemented for interpolated approach')
-                end
-                for l = 1:size(obj.svdSpace,2)
-                    y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
-                    y_a = obj.traj*y_a;
-                    y_a = reshape(y_a, size(obj.sampTimes));
-                    y_a = obj.phsShft.*y_a;
-                    y = y + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
-                end
+                y = subArray(obj, y_b, n, y);
             end
         end
         
         function y = useDirectWorker(obj,x)
             % Use direct model
+            szx = [size(x), 1, 1];
             if obj.adjoint
-                y = x(:).';
-                y = y.*exp(-1i*obj.kbase);
-                y = sum(y,2);
-                y = reshape(y, [obj.imSize, 1]);
-            else
-                y = x(:).*exp(1i*obj.kbase);
-                if ~isempty(obj.ksphaDiv)
-                    y = 1i*y;
-                    phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
-                    y = phiDiv_a.*y;
-                end
-                y = sum(y,1);
-                y = reshape(y, [obj.kSize, 1]);
+				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
+                NdimIn = obj.NDimk;
+			else
+				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
+                NdimIn = obj.NDim;
             end
-            % Normalization so that a cartesian Fourier transform would have
-                % the adjoint equal to the inverse
-            y = y/sqrt(prod(obj.imSize));
+            for n=1:prod(szx(NdimIn+1:end))  
+                x_a = subArray(obj, x, n);
+                if obj.adjoint
+                    y_a = x_a(:).';
+                    y_a = y_a.*exp(-1i*obj.kbase);
+                    y_a = sum(y_a,2);
+                    y_a = reshape(y_a, [obj.imSize, 1]);
+                else
+                    y_a = x_a(:).*exp(1i*obj.kbase);
+                    if ~isempty(obj.ksphaDiv)
+                        y_a = 1i*y_a;
+                        phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
+                        y_a = phiDiv_a.*y_a;
+                    end
+                    y_a = sum(y_a,1);
+                    y_a = reshape(y_a, [obj.kSize, 1]);
+                end
+                % Normalization so that a cartesian Fourier transform would have
+                    % the adjoint equal to the inverse
+                y_a = y_a/sqrt(prod(obj.imSize));
+                y = subArray(obj, y_a, n, y);
+            end
 		end
 
         function y = useSegmentedWorker(obj,x)
-            y = 0;
-            Npnts = ceil(numel(x)/obj.useSegmentedNdiv);
+            % Use direct model in multiple segments (requires less memory,
+            % but is slower)
+            szx = [size(x), 1, 1];
+            if obj.adjoint
+				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
+                NdimIn = obj.NDimk;
+			else
+				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
+                NdimIn = obj.NDim;
+            end          
             for nc = 1:obj.useSegmentedNdiv
-                subinds1 = 1 + (nc-1)*Npnts;
-                subinds2 = min(Npnts + (nc-1)*Npnts, numel(x));
-                if subinds1 <= numel(x)
-                    x_sub = x(subinds1:subinds2);
-                    if obj.adjoint
-                        if obj.useSegmented > 1
-                            phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
-                                obj.sampTimes,[],[],[subinds1,subinds2]);
-                        else
-                            if obj.useGPU
-                                phs = gpuArray(obj.SegPhs{nc,2});
-                            else
-                                phs = obj.SegPhs{nc,2};
-                            end
-                        end
-                        x_sub = x_sub(:).';
-                        tmp = x_sub .* exp(-1i*phs);
-                        y = y + reshape(sum(tmp,2), [obj.imSize, 1]);
+                if obj.adjoint
+                    subinds1 = 1 + (nc-1)*obj.SegNpntsAdj;
+                    subinds2 = min(obj.SegNpntsAdj + (nc-1)*obj.SegNpntsAdj, prod(obj.kSize));
+                    if obj.useSegmented > 1
+                        phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
+                            obj.sampTimes,[],[],[subinds1,subinds2]);
                     else
-                        if obj.useSegmented > 1
-                            phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
-                                obj.sampTimes,[],[subinds1,subinds2],[]);
+                        if obj.useGPU
+                            phs = gpuArray(obj.SegPhs{nc,2});
                         else
-                            if obj.useGPU
-                                phs = gpuArray(obj.SegPhs{nc,1});
-                            else
-                                phs = obj.SegPhs{nc,1};
+                            phs = obj.SegPhs{nc,2};
+                        end
+                    end
+                    for n=1:prod(szx(NdimIn+1:end))
+                        % We loop over channels here to avoid
+                        % recomputing phs for each channel
+                        x_sub = subArray(obj, x, n);
+                        if subinds1 <= numel(x_sub)
+                            x_sub = x_sub(subinds1:subinds2);
+                            x_sub = x_sub(:).';
+                            tmp = x_sub .* exp(-1i*phs);
+                            tmp = reshape(sum(tmp,2), [obj.imSize, 1]);
+                            y = subArray(obj, tmp, n, y, 1);  % the 5th argument makes this add y_a to what is already in y
+                        end
+                    end
+                else
+                    subinds1 = 1 + (nc-1)*obj.SegNpnts;
+                    subinds2 = min(obj.SegNpnts + (nc-1)*obj.SegNpnts, prod(obj.imSize));
+                    if obj.useSegmented > 1
+                        phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
+                            obj.sampTimes,[],[subinds1,subinds2],[]);
+                    else
+                        if obj.useGPU
+                            phs = gpuArray(obj.SegPhs{nc,1});
+                        else
+                            phs = obj.SegPhs{nc,1};
+                        end
+                    end
+                    for n=1:prod(szx(NdimIn+1:end))
+                        % We loop over channels here to avoid
+                        % recomputing phs for each channel
+                        x_sub = subArray(obj, x, n);
+                        if subinds1 <= numel(x_sub)
+                            x_sub = x_sub(subinds1:subinds2);
+                            tmp = x_sub(:) .* exp(1i*phs);
+                            if ~isempty(obj.ksphaDiv)
+                                phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,...
+                                    1,[],[subinds1,subinds2],[]);
+                                tmp = 1i*tmp;
+                                tmp = phiDiv_a.*tmp;
                             end
+                            tmp = reshape(sum(tmp,1), [obj.kSize, 1]);
+                            y = subArray(obj, tmp, n, y, 1);  % the 5th argument makes this add y_a to what is already in y
                         end
-                        tmp = x_sub(:) .* exp(1i*phs);
-                        if ~isempty(obj.ksphaDiv)
-                            phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,...
-                                1,[],[subinds1,subinds2],[]);
-                            tmp = 1i*tmp;
-                            tmp = phiDiv_a.*tmp;
-                        end
-                        y = y + reshape(sum(tmp,1), [obj.kSize, 1]);
                     end
                 end
             end
@@ -369,19 +413,17 @@ classdef sampHighOrder
             y = y/sqrt(prod(obj.imSize));
         end
         
-        function [SegNpnts,SegNpntsAdj,SegPhs] = prepForSegmented(obj)
+        function SegPhs = prepForSegmented(obj)
             try
                 % Precompute segmented encoding matrix
-                SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
-                SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
                 SegPhs = cell(obj.useSegmentedNdiv, 2);
                 for nc = 1:obj.useSegmentedNdiv
                     for nm = 1:2
                         if nm==2
-                            Npnts = SegNpntsAdj;
+                            Npnts = obj.SegNpntsAdj;
                             NpntsTot = prod(obj.kSize);
                         else
-                            Npnts = SegNpnts;
+                            Npnts = obj.SegNpnts;
                             NpntsTot = prod(obj.imSize);
                         end
                         subinds1 = 1 + (nc-1)*Npnts;
@@ -632,7 +674,13 @@ classdef sampHighOrder
             res = obj;
         end
         
-        function out = subArray(obj, x, n, out)
+        function out = subArray(obj, x, n, out, doAdd)
+            if nargin < 4
+                out = [];
+            end
+            if nargin < 5
+                doAdd = 0;
+            end
             if obj.adjoint
                 NdimIn = obj.NDimk;
                 NdimOut = obj.NDim;
@@ -660,11 +708,23 @@ classdef sampHighOrder
                 end
                 switch NdimOut
                     case 1
-                        out(:,n) = out_a;
+                        if doAdd
+                            out(:,n) = out(:,n) + out_a;
+                        else
+                            out(:,n) = out_a;
+                        end
                     case 2
-                        out(:,:,n) = out_a;
+                        if doAdd
+                            out(:,:,n) = out(:,:,n) + out_a;
+                        else
+                            out(:,:,n) = out_a;
+                        end
                     case 3
-                        out(:,:,:,n) = out_a;
+                        if doAdd
+                            out(:,:,:,n) = out(:,:,:,n) + out_a;
+                        else
+                            out(:,:,:,n) = out_a;
+                        end
                     otherwise
                         error('NdimOut not allowed');
                 end
