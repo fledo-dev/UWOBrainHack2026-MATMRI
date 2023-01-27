@@ -540,7 +540,9 @@ classdef sampHighOrder
                     obj.useSegmented = 1;
                     obj.useSegmentedNdiv = ceil(numbytes / (0.1*avMem));
                     obj.kbase = [];
-                    [obj.SegNpnts,obj.SegNpntsAdj,obj.SegPhs] = prepForSegmented(obj);
+                    obj.SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
+                    obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
+                    obj.SegPhs = prepForSegmented(obj);
                 end
             end
                 
