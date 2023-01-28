@@ -308,34 +308,32 @@ classdef sampHighOrder
         function y = useDirectWorker(obj,x)
             % Use direct model
             szx = [size(x), 1, 1];
-            if obj.adjoint
-				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
-                NdimIn = obj.NDimk;
-			else
-				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
-                NdimIn = obj.NDim;
+            if obj.useGPU && ~isa(x, 'gpuArray')
+                y = gpuArray(x);
+            else
+                y = x;
             end
-            for n=1:prod(szx(NdimIn+1:end))  
-                x_a = subArray(obj, x, n);
-                if obj.adjoint
-                    y_a = x_a(:).';
-                    y_a = y_a.*exp(-1i*obj.kbase);
-                    y_a = sum(y_a,2);
-                    y_a = reshape(y_a, [obj.imSize, 1]);
+            if obj.adjoint
+                y = reshape(x, prod(obj.kSize), []);
+                y = exp(-1i*obj.kbase)*y;
+                y = reshape(y, [obj.imSize, szx(obj.NDimk+1:end)]);
+            else
+                y = reshape(y, prod(obj.imSize), []);
+                if isempty(obj.ksphaDiv)
+                    y = exp(1i*obj.kbase.')*y;
                 else
-                    y_a = x_a(:).*exp(1i*obj.kbase);
-                    if ~isempty(obj.ksphaDiv)
-                        y_a = 1i*y_a;
-                        phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
-                        y_a = phiDiv_a.*y_a;
-                    end
-                    y_a = sum(y_a,1);
-                    y_a = reshape(y_a, [obj.kSize, 1]);
+                    tmp = 1i*exp(1i*obj.kbase).*prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
+                    tmp = tmp.';
+                    y = tmp * y;
+                    clear tmp
                 end
-                % Normalization so that a cartesian Fourier transform would have
+                y = reshape(y, [obj.kSize, szx(obj.NDim+1:end)]);
+            end
+            % Normalization so that a cartesian Fourier transform would have
                     % the adjoint equal to the inverse
-                y_a = y_a/sqrt(prod(obj.imSize));
-                y = subArray(obj, y_a, n, y);
+            y = y/sqrt(prod(obj.imSize));
+            if ~isa(x,'gpuArray')
+                y = gather(y);
             end
 		end
 
@@ -343,13 +341,18 @@ classdef sampHighOrder
             % Use direct model in multiple segments (requires less memory,
             % but is slower)
             szx = [size(x), 1, 1];
+            if obj.useGPU && ~isa(x, 'gpuArray')
+                x_a = gpuArray(x);
+            else
+                x_a = x;
+            end
+            
+            y = 0;
             if obj.adjoint
-				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
-                NdimIn = obj.NDimk;
-			else
-				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
-                NdimIn = obj.NDim;
-            end          
+                x_a = reshape(x_a, prod(obj.kSize), []);
+            else
+                x_a = reshape(x_a, prod(obj.imSize), []);
+            end   
             for nc = 1:obj.useSegmentedNdiv
                 if obj.adjoint
                     subinds1 = 1 + (nc-1)*obj.SegNpntsAdj;
@@ -364,18 +367,9 @@ classdef sampHighOrder
                             phs = obj.SegPhs{nc,2};
                         end
                     end
-                    for n=1:prod(szx(NdimIn+1:end))
-                        % We loop over channels here to avoid
-                        % recomputing phs for each channel
-                        x_sub = subArray(obj, x, n);
-                        if subinds1 <= numel(x_sub)
-                            x_sub = x_sub(subinds1:subinds2);
-                            x_sub = x_sub(:).';
-                            tmp = x_sub .* exp(-1i*phs);
-                            tmp = reshape(sum(tmp,2), [obj.imSize, 1]);
-                            y = subArray(obj, tmp, n, y, 1);  % the 5th argument makes this add y_a to what is already in y
-                        end
-                    end
+                    x_sub = x_a(subinds1:subinds2,:);
+                    x_sub = exp(-1i*phs)*x_sub;
+                    y = y + reshape(x_sub, [obj.imSize, szx(obj.NDimk+1:end)]);
                 else
                     subinds1 = 1 + (nc-1)*obj.SegNpnts;
                     subinds2 = min(obj.SegNpnts + (nc-1)*obj.SegNpnts, prod(obj.imSize));
@@ -389,28 +383,24 @@ classdef sampHighOrder
                             phs = obj.SegPhs{nc,1};
                         end
                     end
-                    for n=1:prod(szx(NdimIn+1:end))
-                        % We loop over channels here to avoid
-                        % recomputing phs for each channel
-                        x_sub = subArray(obj, x, n);
-                        if subinds1 <= numel(x_sub)
-                            x_sub = x_sub(subinds1:subinds2);
-                            tmp = x_sub(:) .* exp(1i*phs);
-                            if ~isempty(obj.ksphaDiv)
-                                phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,...
-                                    1,[],[subinds1,subinds2],[]);
-                                tmp = 1i*tmp;
-                                tmp = phiDiv_a.*tmp;
-                            end
-                            tmp = reshape(sum(tmp,1), [obj.kSize, 1]);
-                            y = subArray(obj, tmp, n, y, 1);  % the 5th argument makes this add y_a to what is already in y
-                        end
+                    x_sub = x_a(subinds1:subinds2,:);
+                    if isempty(obj.ksphaDiv)
+                        x_sub = exp(1i*phs.')*x_sub;
+                    else
+                        tmp = 1i*exp(1i*phs).*prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1,[],[subinds1,subinds2],[]);
+                        tmp = tmp.';
+                        x_sub = tmp * x_sub;
+                        clear tmp
                     end
+                    y = y + reshape(x_sub, [obj.kSize, szx(obj.NDim+1:end)]);
                 end
             end
             % Normalization so that a cartesian Fourier transform would have
                 % the adjoint equal to the inverse
             y = y/sqrt(prod(obj.imSize));
+            if ~isa(x,'gpuArray')
+                y = gather(y);
+            end
         end
         
         function SegPhs = prepForSegmented(obj)

@@ -36,6 +36,28 @@ for nd = 1:3
     Sy2 = S'*y;
     assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
     clear S
+    
+    % Confirm that phidiv gives same results for all cases
+    sz_zp = size(phs_spha);
+    sz_zp(2) = 1;
+    dphs_spha = diff(cat(2,zeros(sz_zp, 'like', phs_spha),phs_spha),1,2);
+    sz_zc = size(phs_coco);
+    sz_zc(2) = 1;
+    dphs_coco = diff(cat(2,zeros(sz_zc, 'like', phs_coco),phs_coco),1,2);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],0);
+    S = S.setPhiDiv(dphs_spha,dphs_coco);
+    Sx2_0 = S*x;
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    S = S.setPhiDiv(dphs_spha,dphs_coco);
+    Sx2_1 = S*x;
+    assert(norm(Sx2_0(:)-Sx2_1(:)) < 1e-8, 'Phidiv test failed, seg1.')
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
+    S = S.setPhiDiv(dphs_spha,dphs_coco);
+    Sx2_2 = S*x;
+    assert(norm(Sx2_0(:)-Sx2_2(:)) < 1e-8, 'Phidiv test failed, seg2.')
+    clear S
 end
 
 %% Test interpolation. Use random polynomials to simulate slow variations
@@ -96,11 +118,18 @@ for orient=1:4
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
     Sx = S*xvec;
     Sy = S'*yvec(:);
-    %     tic1 = tic;
-    %     for n=1:10
-    %         Sx = S*x;
-    %     end
-    %     toc1 = toc(tic1)
+    if (0) % phidiv not yet implemented for interp method
+        % Test phidiv
+        sz_zp = size(phs_spha);
+        sz_zp(2) = 1;
+        dphs_spha = diff(cat(2,zeros(sz_zp, 'like', phs_spha),phs_spha),1,2);
+        sz_zc = size(phs_coco);
+        sz_zc(2) = 1;
+        dphs_coco = diff(cat(2,zeros(sz_zc, 'like', phs_coco),phs_coco),1,2);
+        S = S.setPhiDiv(dphs_spha,dphs_coco);
+        Sx_phidiv = S*xvec;
+    end
+    %
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01);
     Sx_b = S*xvec;
     Sy_b = S'*yvec(:);
