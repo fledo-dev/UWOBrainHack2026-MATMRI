@@ -1,8 +1,7 @@
 %% Expanded encoding model using inversion of dense sampling matrix
 %
 %  Modern GPU's have enough memory to store the full dense encoding 
-%  matrix for a single 2D slice, which can be much faster for solving for
-%  the image. This example requires ~10GB GPU memory
+%  matrix for a single 2D slice. This example requires ~10GB GPU memory
 %
 %  (c) Corey Baron, 2022
 

@@ -121,7 +121,7 @@ classdef sampHighOrder
                 else
                     G = gpuDevice;
                     avMem = G.AvailableMemory;
-                    numbytes = numel(b0)*numel(sampTimes)*8;
+                    numbytes = numel(phs_grid.x)*numel(sampTimes)*8;
                     if numbytes < 0.2*avMem
                         obj.useGPU = 1;
                         obj.useSingle = 0;
@@ -271,37 +271,38 @@ classdef sampHighOrder
 		function y = useInterpWorker(obj,x)
             % Use nufft's and interpolation
             szx = [size(x), 1, 1];
-            if obj.adjoint
-				y = zeros([obj.imSize, szx(obj.NDimk+1:end)], 'like', x);
-                NdimIn = obj.NDimk;
-			else
-				y = zeros([obj.kSize, szx(obj.NDim+1:end)], 'like', x);
-                NdimIn = obj.NDim;
+            if obj.useGPU && ~isa(x, 'gpuArray')
+                x_a = gpuArray(x);
+            else
+                x_a = x;
             end
-            for n=1:prod(szx(NdimIn+1:end))    
-                x_a = subArray(obj, x, n);
-                if obj.adjoint 
-                    y_b = 0;
-                    for l = 1:size(obj.svdSpace,2)
-                        y_a = x_a.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
-                        y_a = conj(obj.phsShft).*y_a;
-                        y_a = obj.traj'*y_a(:);
-                        y_b = y_b + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
-                    end
-                else
-                    if ~isempty(obj.ksphaDiv)
-                        error('phiDiv not yet implemented for interpolated approach')
-                    end
-                    y_b = 0;
-                    for l = 1:size(obj.svdSpace,2)
-                        y_a = x_a.*reshape(obj.svdSpace(:,l),size(obj.b0));
-                        y_a = obj.traj*y_a;
-                        y_a = reshape(y_a, size(obj.sampTimes));
-                        y_a = obj.phsShft.*y_a;
-                        y_b = y_b + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
-                    end
+            y = 0;
+            if obj.adjoint 
+                NRep = numel(x_a)/prod(obj.kSize);
+                x_a = reshape(x_a, [obj.kSize, NRep]);
+                for l = 1:size(obj.svdSpace,2)
+                    y_a = x_a.*conj(reshape(obj.svdTime(:,l), [obj.kSize, 1])); 
+                    y_a = conj(obj.phsShft).*y_a;
+                    y_a = obj.traj'*y_a;
+                    y_a = y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
+                    y = y + reshape(y_a, [obj.imSize, szx(obj.NDimk+1:end)]);
                 end
-                y = subArray(obj, y_b, n, y);
+            else
+                if ~isempty(obj.ksphaDiv)
+                    error('phiDiv not yet implemented for interpolated approach')
+                end
+                NRep = numel(x_a)/prod(obj.imSize);
+                x_a = reshape(x_a, [obj.imSize, NRep]);                    
+                for l = 1:size(obj.svdSpace,2)
+                    y_a = x_a.*reshape(obj.svdSpace(:,l),size(obj.b0));
+                    y_a = obj.traj*y_a;
+                    y_a = obj.phsShft.*reshape(y_a, [obj.kSize, NRep]);
+                    y_a = y_a.*reshape(obj.svdTime(:,l), [obj.kSize, 1]); 
+                    y = y + reshape(y_a, [obj.kSize, szx(obj.NDim+1:end)]);
+                end
+            end
+            if ~isa(x,'gpuArray')
+                y = gather(y);
             end
         end
         

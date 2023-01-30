@@ -1,4 +1,4 @@
-function a = fftnc(a, N, doShift, doScale);
+function a = fftnc(a, N, doShift, doScale, sz)
 % Calculates the multidimensional fft of a matrix with DC at the
 % center of the matrix. 
 %
@@ -11,6 +11,9 @@ function a = fftnc(a, N, doShift, doScale);
 % 
 % (c) Corey Baron
 
+if (nargin<5)
+    sz = [];
+end
 if(nargin<4) || isempty(doScale)
   doScale = 1;
 end
@@ -27,16 +30,24 @@ end
 
 scale = 1;
 if doShift
-  for n=1:N
+  for n=1:N    
+    a = fftshift(a,n);
+    if ~isempty(sz)
+        a = fft(a,sz(n),n);
+    else
+        a = fft(a,[],n);
+    end
+    a = fftshift(a,n);
     scale = scale*sqrt(size(a,n));
-    a = fftshift(a,n);
-    a = fft(a,[],n);
-    a = fftshift(a,n);
   end
 else
-  for n=1:N
+  for n=1:N  
+    if ~isempty(sz)
+        a = fft(a,sz(n),n);
+    else
+        a = fft(a,[],n);
+    end
     scale = scale*sqrt(size(a,n));
-    a = fft(a,[],n);
   end
 end
 

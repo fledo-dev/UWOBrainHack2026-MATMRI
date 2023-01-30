@@ -39,7 +39,7 @@ for nD = 1:3
     % Test repetitions over loops
     x = repmat(x, [ones(1,nD),2,2]);
     y = repmat(y, [1,2,2]);
-    for loopDim=1:3
+    for loopDim=nD:nD+1
         S.loopDim = loopDim;
         Sx = S*x;
         Sy = S'*y;
