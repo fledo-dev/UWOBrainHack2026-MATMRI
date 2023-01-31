@@ -467,7 +467,7 @@ classdef sampHighOrder
                 b0_a = b0_a(:);
             else
                 if ~isempty(obj.b0mask)
-                    b0mask_a(:) = obj.b0mask;
+                    b0mask_a = obj.b0mask(:);
                 end
                 b0_a = obj.b0(:);
             end
