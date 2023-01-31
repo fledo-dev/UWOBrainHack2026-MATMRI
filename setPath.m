@@ -25,4 +25,8 @@ function setPath
   addpath([topPath, 'trajectory']);
   addpath([topPath, 'unitTests']);
 
+  
+   % Set matMRI version
+  global matMRIVersion
+  matMRIVersion = 1.07;
 end

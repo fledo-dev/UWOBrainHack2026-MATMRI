@@ -59,16 +59,13 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
             % Interpolate to match datatimes
             delSk = delSk0+courseTest*dtsamp;
             [phs_spha_a,phs_conc_a] = interpTrajTime(phs_spha,phs_conc,tdwell,delSk,datatime);
-            daNFull = [length(datatime),1,1,size(Crcvr,4)];
 
             % Update image
             S = sampHighOrder(b0map, datatime(:), phs_spha_a', phs_conc_a', phs_sph_grid, [], [], [], interpThresh);
-            optSampFunc.daNFull = daNFull;
-            optSampFunc.imNFull = size(phs_sph_grid.x);
-            opFunc = @(x,transp) mrSampFunc(x,transp,S,R,optSampFunc);
+            opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
             % Use the same number of iterations for all recons
             opt_cgne_c.stopOnResInc = 0;
-            [x, resvec] = cgne(opFunc,data_in(:),[],maxNit_cgne,opt_cgne_c); 
+            [~, resvec] = cgne(opFunc,data_in(:),[],maxNit_cgne,opt_cgne_c); 
             if resvec(end)<resvec_min
                 delSk_min = delSk;
                 resvec_min = resvec(end);
@@ -92,28 +89,25 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
         % Interpolate to match datatimes
         [phs_spha_a,phs_conc_a] = interpTrajTime(phs_spha,phs_conc,tdwell,delSk,datatime);
         [dspha_dt_a,dconc_dt_a] = interpTrajTime(dspha_dt,dconc_dt,tdwell,delSk,datatime);
-        daNFull = [length(datatime),1,1,size(Crcvr,4)];
 
         % Update image
         S = sampHighOrder(b0map, datatime(:), phs_spha_a', phs_conc_a', phs_sph_grid, [], [], [], interpThresh);
-        optSampFunc.daNFull = daNFull;
-        optSampFunc.imNFull = size(phs_sph_grid.x);
-        opFunc = @(x,transp) mrSampFunc(x,transp,S,R,optSampFunc);
+        opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
         if ntry>0
             % Use the same number of iterations for all recons
             opt_cgne.stopOnResInc = 0;
             maxNit_cgne = length(resvec)-1;
         end
-        [x, resvec] = cgne(opFunc,data_in(:),[],maxNit_cgne,opt_cgne); 
-        x = reshape(x,optSampFunc.imNFull);
+        [x, resvec] = cgne(opFunc,data_in,[],maxNit_cgne,opt_cgne);
         
         % Update delay
-        bhat = data_in(:) - opFunc(x(:),'notransp');
+        bhat = data_in - opFunc(x,'notransp');
         clear opFunc
         S = S.setPhiDiv(dspha_dt_a',dconc_dt_a');
-        opFunc = @(x,transp) mrSampFunc(x,transp,S,R,optSampFunc);        
-        bhathat = opFunc(x(:),'notransp');
-        delChange = bhathat\bhat;
+        opFunc = @(x,transp) mrSampFunc(x,transp,S,R);  
+        bhathat = opFunc(x,'notransp');
+        clear opFunc
+        delChange = bhathat(:)\bhat(:);
         delChange = delJumpFact*real(delChange);
         delSk = delSk + delChange;
         fprintf('  %.2f', delSk - delSk0)

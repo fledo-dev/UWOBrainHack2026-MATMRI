@@ -2,7 +2,7 @@ classdef sampHighOrder
 % Perform MRI sampling using direct summation of complex exponentials.
 % Supports B0 map, time-varying spherical harmonic distributions of phase,
 % and time-varying distributions of phase that are typical for concomitant
-% gradients. Currently 2D only.
+% gradients. Supports 1D, 2D, or 3D.
 %
 % Usage: 
 %   Define sampHighOrder object using 
@@ -17,6 +17,7 @@ classdef sampHighOrder
 % Inputs: 
 %   b0: B0 map in units of rad/s. Caution: make sure orientation
 %       of b0 is consistent with phs_grid.x and phs_grid.y.
+%       Can provide empty matrix to ignore B0 effects (not recommended).
 %   sampTimes: sampling times in units of s. Can be multi-dimensional.
 %   phs_spha:  [Ncoeff_spha x size(sampTimes)] array of coefficients for
 %       spherical harmonic phase. Units are rad/<spatial>, where <spatial>
@@ -30,7 +31,7 @@ classdef sampHighOrder
 %       Should be created using ndgrid or meshgrid. If created with
 %       meshgrid, phs_grid.x will have positions varying along 2nd dim
 %       (with ndgrid, variation along 1st dim), and vice versa for
-%       phs_grid.y. Each field of phs_grid must be the same size as b0.
+%       phs_grid.y. Size of b0 map must be same size as each field of phs_grid.
 %           phs_grid.x: value of x at each position in units of m. 
 %           phs_grid.y: value of y at each position in units of m. 
 %           phs_grid.z: value of z at each position in units of m. 
@@ -60,17 +61,20 @@ classdef sampHighOrder
 %   (c) Corey Baron 2020
 
 	properties
-		NDim = 2;   % Number of dims to do sums over in both image domain and k-space. 
         useSingle = 0;
 		useGPU = 1;
 		useInterp = 0; 
-        noPrecomp = 0;
+        useSegmented = 0;    % Whether to use segmented encoding matrix. May be necessary for large data size
+                          %   1: use segmented, but still precompute array and save in RAM
+                          %   2: use segmented with no precomputation at all. Slowest option, but least memory.
         svdThresh = 0.05; % Threshold for svd used in interpolated method
         subFact = 5;      % Factor to subsample in time by for interpolated approach
 	end
 
 	properties (SetAccess = protected)
 		adjoint = 0;
+        NDim = [];  % Number of object domain dimensions
+        NDimk = []; % Number of k-space dimensions
 		b0 = []; % rad/sec
         b0mask = [];
         phs_spha = []; % 0th, 1st, 2nd and 3rd order spherical harmonic terms for phase over time. Must have dimensions 16 x size(sampTimes). 
@@ -86,18 +90,21 @@ classdef sampHighOrder
 		kSize = [];
 		imSize = [];
         trajFromRaw = [];
-        noPrecompNdiv = [];
+        useSegmentedNdiv = [];
         ksphaDiv = [];
         kconcDiv = [];
+        SegNpnts = [];     % Seg* variables are for segmented encoding matrix with precomputation
+        SegNpntsAdj = [];
+        SegPhs = [];
 	end
 
 	methods
 
-		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFact,noPrecomp)
+		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFact,useSegmented)
 			if nargin == 0
 				obj.tests;
 				return;
-            end
+			end
             if nargin>5
 				obj.b0mask = b0mask;
             end
@@ -114,7 +121,7 @@ classdef sampHighOrder
                 else
                     G = gpuDevice;
                     avMem = G.AvailableMemory;
-                    numbytes = numel(b0)*numel(sampTimes)*8;
+                    numbytes = numel(phs_grid.x)*numel(sampTimes)*8;
                     if numbytes < 0.2*avMem
                         obj.useGPU = 1;
                         obj.useSingle = 0;
@@ -127,15 +134,15 @@ classdef sampHighOrder
                         obj.useGPU = 1;
                         obj.useSingle = 1;
                         obj.useInterp = 0;
-                        obj.noPrecomp = 1;
-                        obj.noPrecompNdiv = ceil(numbytes / (0.2*avMem)); % 0.2 factor was determine heuristically
-                        if obj.noPrecompNdiv > max(numel(b0),numel(sampTimes))/4
+                        obj.useSegmented = 1;
+                        obj.useSegmentedNdiv = ceil(numbytes / (0.2*avMem)); % 0.2 factor was determine heuristically
+                        if obj.useSegmentedNdiv > max(numel(b0),numel(sampTimes))/4
                             % Unlikely, but possible. Still use single,
                             % because matrix size must be massive.
                             obj.useGPU = 0;
                             obj.useSingle = 1;
                             obj.useInterp = 1;
-                            obj.noPrecomp = 0;
+                            obj.useSegmented = 0;
                         end
                     end
                 end
@@ -155,9 +162,9 @@ classdef sampHighOrder
                 if nargin>10 && ~isempty(subFact)
                     obj.subFact = subFact;
                 end
-                if nargin>11 && ~isempty(noPrecomp)
-                    obj.noPrecomp = noPrecomp;
-                    obj.noPrecompNdiv = 2;
+                if nargin>11 && ~isempty(useSegmented)
+                    obj.useSegmented = useSegmented;
+                    obj.useSegmentedNdiv = 2;
                 end
             end
             if obj.subFact < 1
@@ -167,37 +174,40 @@ classdef sampHighOrder
             if ~(gpuDeviceCount>0) && obj.useGPU
                 warning('No GPU detected or GPU not supported. Using CPU.')
                 obj.useGPU = 0;
+            end  
+            obj.phs_grid = phs_grid;
+			obj.imSize = size(phs_grid.x);  
+            if isempty(b0)
+                obj.b0 = zeros(size(phs_grid.x), 'like', phs_grid.x);
+            elseif ~all(size(b0) == obj.imSize)
+                error('Size mismatch between b0 and phs_grid.x');
+            else
+                obj.b0 = b0;
             end
-			obj.NDim = 2; % This class currently coded/optimized for 2D only
-			obj.b0 = b0;    
-			obj.imSize = size(b0);   
 			obj.sampTimes = sampTimes;
             obj.kSize = size(obj.sampTimes);
+            if (length(obj.imSize) == 2) && (obj.imSize(2) == 1)
+                obj.imSize = obj.imSize(1);
+            end
+            if (length(obj.kSize) == 2) && (obj.kSize(2) == 1)
+                obj.kSize = obj.kSize(1);
+            end
+            obj.NDim  = length(obj.imSize);
+            obj.NDimk = length(obj.kSize);
+            if (obj.NDim > 3) || (obj.NDimk > 3)
+                error('Only up to 3D in object- or sampling-domain allowed')
+            end
 			obj.phs_spha = phs_spha;
 			sz_a = size(phs_spha);
-            if length(obj.kSize) == 2 && obj.kSize(2) == 1
-                % Account for 1D sampTimes
-                sz_a = [sz_a, 1];
-            end
-			if any(sz_a(2:end) ~= size(sampTimes))
+			if any(sz_a(2:end) ~= obj.kSize)
 				error('Dimension mismatch between phs_spha and sampTimes')
 			end
-			if length(obj.kSize)>obj.NDim || length(obj.imSize)>obj.NDim
-				error('Only up to %d dimensions allowed',obj.NDim);
-            end
             % Check if gpu is possible
             if ~(gpuDeviceCount>0) && obj.useGPU
                 warning('No GPU detected. Using CPU. To disable this warning, set option useGPU to 0')
                 obj.useGPU = 0;
             end
 			obj.phs_conc = phs_conc;
-            obj.phs_grid = phs_grid;
-            if obj.NDim < 2
-                % This is needed because size() always outputs at least two
-                % values, even for vectors. Can hack 1D by having all size
-                % of b0 = 1 x N.
-                error('need at least 2 dimensions')
-            end
 			% Use single precision if requested
 			if obj.useSingle
                 obj.sampTimes = single(obj.sampTimes);
@@ -227,13 +237,18 @@ classdef sampHighOrder
                     obj.svdSpace = gpuArray(obj.svdSpace);
                     obj.phsShft = gpuArray(obj.phsShft);
                 end
-            elseif ~obj.noPrecomp
+            elseif ~obj.useSegmented
 				obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
+            elseif obj.useSegmented 
+                obj.SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
+                obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
+                if obj.useSegmented == 1
+                    obj.SegPhs = prepForSegmented(obj);
+                end
 			end
 		end
 
-		function y = mtimes(obj,x)
-			szx = [size(x), 1, 1];
+		function y = mtimes(obj,x)			
             if obj.useSingle
                 if (isa(x,'gpuArray') && ~isaUnderlying(x,'single')) || ~isa(x,'single')
                     %warning('useSingle specified, but input is not single. Forcing to be single.')
@@ -241,106 +256,188 @@ classdef sampHighOrder
                 end
             end
 
-			if obj.adjoint
-				y = zeros([obj.imSize, szx(3:end)], 'like', x);
-			else
-				y = zeros([obj.kSize, szx(3:end)], 'like', x);
-			end
-			for n=1:prod(szx(3:end))
-				x_a = x(:,:,n);
-				if obj.useGPU && ~isa(x_a, 'gpuArray')
-					x_a = gpuArray(x_a);
-				end
-				y_a = applyModel(obj,x_a);
-				if ~isa(x,'gpuArray')
-					y_a = gather(y_a);
-				end
-				y(:,:,n) = y_a;
+            % Choose method (all should give the same result, but with
+            % different trade-offs in terms of speed, memory usage, and
+            % accuracy (only obj.useInterp can reduce accuracy)
+            if obj.useInterp
+                y = useInterpWorker(obj,x);
+            elseif obj.useSegmented
+                y = useSegmentedWorker(obj,x);
+            else
+                y = useDirectWorker(obj,x);
             end
         end
 		
-		function y = applyModel(obj,x)
-			if obj.useInterp
-				% Use nufft's and interpolation
-				y = 0;
-				if obj.adjoint
-					for l = 1:size(obj.svdSpace,2)
-                        y_a = x.*conj(reshape(obj.svdTime(:,l), size(obj.sampTimes))); 
-                        y_a = conj(obj.phsShft).*y_a;
-						y_a = obj.traj'*y_a(:);
-                        y = y + y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
-					end
-				else
-                    if ~isempty(obj.ksphaDiv)
-                        error('phiDiv not yet implemented for interpolated approach')
-                    end
-					for l = 1:size(obj.svdSpace,2)
-                        y_a = x.*reshape(obj.svdSpace(:,l),size(obj.b0));
-                        y_a = obj.traj*y_a;
-                        y_a = reshape(y_a, size(obj.sampTimes));
-                        y_a = obj.phsShft.*y_a;
-                        y = y + y_a.*reshape(obj.svdTime(:,l), size(obj.sampTimes)); 
-					end
-				end
-			else
-				% Use direct model
-                if obj.noPrecomp
-                    y = noPrecompWorker(obj,x);
-                else
-                    if obj.adjoint
-                        x = permute(x, [obj.NDim+1:obj.NDim+length(obj.kSize) 1:obj.NDim]);
-                        y = x.*exp(-1i*obj.kbase);
-                        y = sum(y,3);
-                        y = sum(y,4);
-                    else
-                        y = x.*exp(1i*obj.kbase);
-                        if ~isempty(obj.ksphaDiv)
-                            y = 1i*y;
-                            phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
-                            y = phiDiv_a.*y;
-                        end
-                        y = sum(y,1);
-                        y = sum(y,2);
-                        y = reshape(y, obj.kSize);
-                    end
+		function y = useInterpWorker(obj,x)
+            % Use nufft's and interpolation
+            szx = [size(x), 1, 1];
+            if obj.useGPU && ~isa(x, 'gpuArray')
+                x_a = gpuArray(x);
+            else
+                x_a = x;
+            end
+            y = 0;
+            if obj.adjoint 
+                NRep = numel(x_a)/prod(obj.kSize);
+                x_a = reshape(x_a, [obj.kSize, NRep]);
+                for l = 1:size(obj.svdSpace,2)
+                    y_a = x_a.*conj(reshape(obj.svdTime(:,l), [obj.kSize, 1])); 
+                    y_a = conj(obj.phsShft).*y_a;
+                    y_a = obj.traj'*y_a;
+                    y_a = y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
+                    y = y + reshape(y_a, [obj.imSize, szx(obj.NDimk+1:end)]);
                 end
-                
-                % Normalization so that a cartesian Fourier tranform would have
-                % the adjoint equal to the inverse
-                sz = size(obj.phs_grid.x);
-                y = y/sqrt(prod(sz(1:obj.NDim)));
-			end
+            else
+                if ~isempty(obj.ksphaDiv)
+                    error('phiDiv not yet implemented for interpolated approach')
+                end
+                NRep = numel(x_a)/prod(obj.imSize);
+                x_a = reshape(x_a, [obj.imSize, NRep]);                    
+                for l = 1:size(obj.svdSpace,2)
+                    y_a = x_a.*reshape(obj.svdSpace(:,l),size(obj.b0));
+                    y_a = obj.traj*y_a;
+                    y_a = obj.phsShft.*reshape(y_a, [obj.kSize, NRep]);
+                    y_a = y_a.*reshape(obj.svdTime(:,l), [obj.kSize, 1]); 
+                    y = y + reshape(y_a, [obj.kSize, szx(obj.NDim+1:end)]);
+                end
+            end
+            if ~isa(x,'gpuArray')
+                y = gather(y);
+            end
+        end
+        
+        function y = useDirectWorker(obj,x)
+            % Use direct model
+            szx = [size(x), 1, 1];
+            if obj.useGPU && ~isa(x, 'gpuArray')
+                y = gpuArray(x);
+            else
+                y = x;
+            end
+            if obj.adjoint
+                y = reshape(x, prod(obj.kSize), []);
+                y = exp(-1i*obj.kbase)*y;
+                y = reshape(y, [obj.imSize, szx(obj.NDimk+1:end)]);
+            else
+                y = reshape(y, prod(obj.imSize), []);
+                if isempty(obj.ksphaDiv)
+                    y = exp(1i*obj.kbase.')*y;
+                else
+                    tmp = 1i*exp(1i*obj.kbase).*prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1);
+                    tmp = tmp.';
+                    y = tmp * y;
+                    clear tmp
+                end
+                y = reshape(y, [obj.kSize, szx(obj.NDim+1:end)]);
+            end
+            % Normalization so that a cartesian Fourier transform would have
+                    % the adjoint equal to the inverse
+            y = y/sqrt(prod(obj.imSize));
+            if ~isa(x,'gpuArray')
+                y = gather(y);
+            end
 		end
 
-        function y = noPrecompWorker(obj,x)
+        function y = useSegmentedWorker(obj,x)
+            % Use direct model in multiple segments (requires less memory,
+            % but is slower)
+            szx = [size(x), 1, 1];
+            if obj.useGPU && ~isa(x, 'gpuArray')
+                x_a = gpuArray(x);
+            else
+                x_a = x;
+            end
+            
             y = 0;
-            Npnts = ceil(numel(x)/obj.noPrecompNdiv);
-            for nc = 1:obj.noPrecompNdiv
-                subinds1 = 1 + (nc-1)*Npnts;
-                subinds2 = min(Npnts + (nc-1)*Npnts, numel(x));
-                if subinds1 <= numel(x)
-                    x_sub = x(subinds1:subinds2);
-                    if obj.adjoint
+            if obj.adjoint
+                x_a = reshape(x_a, prod(obj.kSize), []);
+            else
+                x_a = reshape(x_a, prod(obj.imSize), []);
+            end   
+            for nc = 1:obj.useSegmentedNdiv
+                if obj.adjoint
+                    subinds1 = 1 + (nc-1)*obj.SegNpntsAdj;
+                    subinds2 = min(obj.SegNpntsAdj + (nc-1)*obj.SegNpntsAdj, prod(obj.kSize));
+                    if obj.useSegmented > 1
                         phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
                             obj.sampTimes,[],[],[subinds1,subinds2]);
-                        x_sub = reshape(x_sub, [ones(1,length(obj.imSize)), numel(x_sub)]);
-                        tmp = x_sub .* exp(-1i*phs);
-                        y = y + sum(tmp,length(obj.imSize)+1);
                     else
+                        if obj.useGPU
+                            phs = gpuArray(obj.SegPhs{nc,2});
+                        else
+                            phs = obj.SegPhs{nc,2};
+                        end
+                    end
+                    x_sub = x_a(subinds1:subinds2,:);
+                    x_sub = exp(-1i*phs)*x_sub;
+                    y = y + reshape(x_sub, [obj.imSize, szx(obj.NDimk+1:end)]);
+                else
+                    subinds1 = 1 + (nc-1)*obj.SegNpnts;
+                    subinds2 = min(obj.SegNpnts + (nc-1)*obj.SegNpnts, prod(obj.imSize));
+                    if obj.useSegmented > 1
                         phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
                             obj.sampTimes,[],[subinds1,subinds2],[]);
-                        phs = reshape(phs, numel(x_sub), []);
-                        tmp = x_sub(:) .* exp(1i*phs);
-                        if ~isempty(obj.ksphaDiv)
-                            phiDiv_a = prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,...
-                                1,[],[subinds1,subinds2],[]);
-                            phiDiv_a = reshape(phiDiv_a, numel(x_sub), []);
-                            tmp = 1i*tmp;
-                            tmp = phiDiv_a.*tmp;
+                    else
+                        if obj.useGPU
+                            phs = gpuArray(obj.SegPhs{nc,1});
+                        else
+                            phs = obj.SegPhs{nc,1};
                         end
-                        y = y + reshape(sum(tmp,1), obj.kSize);
+                    end
+                    x_sub = x_a(subinds1:subinds2,:);
+                    if isempty(obj.ksphaDiv)
+                        x_sub = exp(1i*phs.')*x_sub;
+                    else
+                        tmp = 1i*exp(1i*phs).*prepForDirect(obj,obj.ksphaDiv,obj.kconcDiv,1,[],[subinds1,subinds2],[]);
+                        tmp = tmp.';
+                        x_sub = tmp * x_sub;
+                        clear tmp
+                    end
+                    y = y + reshape(x_sub, [obj.kSize, szx(obj.NDim+1:end)]);
+                end
+            end
+            % Normalization so that a cartesian Fourier transform would have
+                % the adjoint equal to the inverse
+            y = y/sqrt(prod(obj.imSize));
+            if ~isa(x,'gpuArray')
+                y = gather(y);
+            end
+        end
+        
+        function SegPhs = prepForSegmented(obj)
+            try
+                % Precompute segmented encoding matrix
+                SegPhs = cell(obj.useSegmentedNdiv, 2);
+                for nc = 1:obj.useSegmentedNdiv
+                    for nm = 1:2
+                        if nm==2
+                            Npnts = obj.SegNpntsAdj;
+                            NpntsTot = prod(obj.kSize);
+                        else
+                            Npnts = obj.SegNpnts;
+                            NpntsTot = prod(obj.imSize);
+                        end
+                        subinds1 = 1 + (nc-1)*Npnts;
+                        subinds2 = min(Npnts + (nc-1)*Npnts, NpntsTot);
+                        if subinds1 <= NpntsTot
+                            if nm==2
+                                tmp = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
+                                    obj.sampTimes,[],[],[subinds1,subinds2]);
+                            else
+                                tmp = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
+                                    obj.sampTimes,[],[subinds1,subinds2],[]);
+                            end
+                            SegPhs{nc,nm} = gather(tmp);
+                        end
                     end
                 end
+            catch ME
+                if contains(ME.message, 'memory') || strcmp(ME.identifier, 'MATLAB:array:SizeLimitExceeded')
+                    msg = 'Set sampHighOrder option useSegmented = 2 if out of memory';
+                    causeException = MException('MATLAB:sampHighOrder:memory',msg);
+                    ME = addCause(ME,causeException);
+                end
+                rethrow(ME);
             end
         end
 
@@ -364,72 +461,82 @@ classdef sampHighOrder
             if ~isempty(subIndsSpace) 
                 if ~isempty(obj.b0mask)
                     b0mask_a = obj.b0mask(subIndsSpace(1):subIndsSpace(2));
+                    b0mask_a = b0mask_a(:);
                 end
                 b0_a = obj.b0(subIndsSpace(1):subIndsSpace(2));
+                b0_a = b0_a(:);
             else
                 if ~isempty(obj.b0mask)
-                    b0mask_a = obj.b0mask;
+                    b0mask_a = obj.b0mask(:);
                 end
-                b0_a = obj.b0;
+                b0_a = obj.b0(:);
             end
-			% Move all time dims to enable implicit replication when multiplying spatial dims by time dims
+			% Vectorize time dims to a row vector to enable implicit replication when multiplying spatial dims by time dims
             if numel(sampTimes_a) > 1
-			    sampTimes_a = permute(sampTimes_a, [length(obj.kSize)+1:length(obj.kSize)+obj.NDim 1:length(obj.kSize)]);
+                sampTimes_a = sampTimes_a(:).';
             end
-			phs_spha_a = permute(phs_spha_a, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
-			phs_conc_a = permute(phs_conc_a, [1 length(obj.kSize)+2:length(obj.kSize)+obj.NDim 2:obj.NDim+1]);
+            phs_spha_a = phs_spha_a(:,:);
+            phs_conc_a = phs_conc_a(:,:);
 			% Precompute spatial variation at all times (high memory demand, but very fast)
             phs = 0;
             for n=sphaInds
 				% Add all spatially varying spherical harmonic terms
                 bfunc = basisFuncHarm(obj.phs_grid.x,obj.phs_grid.y,obj.phs_grid.z,n,subIndsSpace);
-                phs_a = bfunc .* phs_spha_a(n, 1, :, :);
+                bfunc = bfunc(:);
                 if n>4 && ~isempty(obj.b0mask)
-                    phs_a = phs_a.*b0mask_a;
+                    bfunc = bfunc.*b0mask_a;
                 end
+                phs_a = bfunc .* phs_spha_a(n,:);
 				phs = phs + phs_a;
             end
             for n=1:size(phs_conc_a,1)
 				% Add all concomitant gradient terms
                 bfunc = basisFuncConc(obj.phs_grid.x,obj.phs_grid.y,obj.phs_grid.z,n,subIndsSpace);
-                phs_a = bfunc .* phs_conc_a(n, 1, :, :);
+                bfunc = bfunc(:);
                 if ~isempty(obj.b0mask)
-                    phs_a = phs_a.*b0mask_a;
+                    bfunc = bfunc.*b0mask_a;
                 end
+                phs_a = bfunc .* phs_conc_a(n,:);
 				phs = phs + phs_a;
             end
             if numel(sampTimes_a)>1
-                phs_a = b0_a.*sampTimes_a;
                 if ~isempty(obj.b0mask)
-                    phs_a = phs_a.*b0mask_a;
+                    b0_a = b0_a.*b0mask_a;
                 end
+                phs_a = b0_a.*sampTimes_a;
                 phs = phs + phs_a;
             end
 			kbase = phs;
 		end
 
         function obj = setPhiDiv(obj,ksphaDiv,kconcDiv)
-            % Check memory again, since PhiDiv greatly increases memory
-            % demand.
-            G = gpuDevice;
-            avMem = G.AvailableMemory;
-            numbytes = numel(obj.b0)*numel(obj.sampTimes)*8;
-            if numbytes < 0.15*avMem
-                obj.useGPU = 1;
-                obj.useSingle = 0;
-                obj.useInterp = 0;
-            elseif numbytes < 0.3*avMem
-                obj.useGPU = 1;
-                obj.useSingle = 1;
-                obj.useInterp = 0;
-            else
-                obj.useGPU = 1;
-                obj.useSingle = 1;
-                obj.useInterp = 0;
-                obj.noPrecomp = 1;
-                obj.noPrecompNdiv = ceil(numbytes / (0.1*avMem));
-                obj.kbase = [];
+            if (obj.useSegmented ~= 2) || ~obj.useInterp
+                % Check memory again, since PhiDiv greatly increases memory
+                % demand.
+                G = gpuDevice;
+                avMem = G.AvailableMemory;
+                numbytes = numel(obj.b0)*numel(obj.sampTimes)*8;
+                if numbytes < 0.15*avMem
+                    obj.useGPU = 1;
+                    obj.useSingle = 0;
+                    obj.useInterp = 0;
+                elseif numbytes < 0.3*avMem
+                    obj.useGPU = 1;
+                    obj.useSingle = 1;
+                    obj.useInterp = 0;
+                else
+                    obj.useGPU = 1;
+                    obj.useSingle = 1;
+                    obj.useInterp = 0;
+                    obj.useSegmented = 1;
+                    obj.useSegmentedNdiv = ceil(numbytes / (0.1*avMem));
+                    obj.kbase = [];
+                    obj.SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
+                    obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
+                    obj.SegPhs = prepForSegmented(obj);
+                end
             end
+                
             % ksphaDiv and kconcDiv are temporal derivatives of obj.phs_spha and obj.phs_conc
             if obj.useSingle
                 ksphaDiv = single(ksphaDiv);
@@ -439,13 +546,9 @@ classdef sampHighOrder
 			if obj.useGPU
 				ksphaDiv = gpuArray(ksphaDiv);
 				kconcDiv = gpuArray(kconcDiv);
-            end
-            %if obj.noPrecomp
-                obj.ksphaDiv = ksphaDiv;
-                obj.kconcDiv = kconcDiv;
-            %else
-            %    obj.phiDiv = prepForDirect(obj,ksphaDiv,kconcDiv,1);
-            %end
+			end
+            obj.ksphaDiv = ksphaDiv;
+            obj.kconcDiv = kconcDiv;
         end
 		
 		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
@@ -454,6 +557,9 @@ classdef sampHighOrder
 			% 1. have normal vector to slice as an optional input
 			% 2. find linear combination of terms 2:4 in kspha for in-plane to slice
 			% 3. set that to kloc, and substract from kspha. Then can still have all kspha terms in sum below
+            if (obj.NDim ~= 2)
+                error('Interpolation currently only supported for 2D in object domain')
+            end
             sz_spha = size(obj.phs_spha);
             kloc = zeros([2,sz_spha(2:end)], 'like', obj.phs_spha);
             if abs(obj.phs_grid.z(2,2)-obj.phs_grid.z(1,1)) ~= 0
@@ -502,7 +608,6 @@ classdef sampHighOrder
 			clear kloc
 			% Determine full non-linear encoding matrix
 			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
-			b = reshape(b, numel(obj.b0), numel(obj.sampTimes));
             % Sub-sample b along time dimension to speed up svd, since
             % phase is slowly varying in time. We do not subsample in
             % space, since high resolution is important for the B0 map
@@ -560,6 +665,63 @@ classdef sampHighOrder
         function  res = ctranspose(obj)
             obj.adjoint = xor(obj.adjoint,1);
             res = obj;
+        end
+        
+        function out = subArray(obj, x, n, out, doAdd)
+            if nargin < 4
+                out = [];
+            end
+            if nargin < 5
+                doAdd = 0;
+            end
+            if obj.adjoint
+                NdimIn = obj.NDimk;
+                NdimOut = obj.NDim;
+            else
+                NdimIn = obj.NDim;
+                NdimOut = obj.NDimk;
+            end
+            if (nargin < 4) || isempty(out)
+                switch NdimIn
+                    case 1
+                        out = x(:,n);
+                    case 2
+                        out = x(:,:,n);
+                    case 3
+                        out = x(:,:,:,n);
+                    otherwise
+                        error('NdimIn not allowed');
+                end
+                if obj.useGPU && ~isa(out, 'gpuArray')
+                    out = gpuArray(out);
+                end
+            else
+                if ~isa(out,'gpuArray')
+                    out_a = gather(x);
+                end
+                switch NdimOut
+                    case 1
+                        if doAdd
+                            out(:,n) = out(:,n) + out_a;
+                        else
+                            out(:,n) = out_a;
+                        end
+                    case 2
+                        if doAdd
+                            out(:,:,n) = out(:,:,n) + out_a;
+                        else
+                            out(:,:,n) = out_a;
+                        end
+                    case 3
+                        if doAdd
+                            out(:,:,:,n) = out(:,:,:,n) + out_a;
+                        else
+                            out(:,:,:,n) = out_a;
+                        end
+                    otherwise
+                        error('NdimOut not allowed');
+                end
+            end
         end
         
 	end

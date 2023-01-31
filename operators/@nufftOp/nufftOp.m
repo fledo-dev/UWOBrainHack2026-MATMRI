@@ -66,7 +66,7 @@ classdef nufftOp
 		os = 1.5;       % oversampling factor
 		useGPU = 1;	    % whether to use gpu. 
         useSingle = 0;  % whether to use single precision to save memory. NB: matlab currently does not support single sparse arrays, so this is not yet possible...
-        loopDim = 3;    % maximum number of dims to do matrix based mtimes rather than loops. Trade-off between speed and memory requirements
+        loopDim = 4;    % maximum number of dims to do matrix based mtimes rather than loops. Trade-off between speed and memory requirements
         dcf = [];		% density compensation
     end
 
@@ -82,6 +82,7 @@ classdef nufftOp
         imgN = [];   		% image matrix size
         isToep = false;
         nofftShift = 1; % do not explicitely use fftshifts to save time. 
+        fftShiftArray = [];
     end
 
 	methods
@@ -115,7 +116,9 @@ classdef nufftOp
             % Convert data types
             if obj.useSingle
                 obj.kloc = single(obj.kloc);
-                obj.dcf = single(obj.dcf);
+                if ~isempty(obj.dcf)
+                    obj.dcf = single(obj.dcf);
+                end
             elseif ~isa(obj.kloc,'double')
                 obj.kloc = double(obj.kloc);
                 if ~isempty(obj.dcf)
@@ -124,7 +127,9 @@ classdef nufftOp
             end
             if obj.useGPU
                 obj.kloc = gpuArray(obj.kloc);
-                obj.dcf = gpuArray(obj.dcf);
+                if ~isempty(obj.dcf)
+                    obj.dcf = gpuArray(obj.dcf);
+                end
             end
 			% Do precalculations
             obj = obj.doPrep;
@@ -140,7 +145,7 @@ classdef nufftOp
 			% Set oversampled grid size 
 			obj.osN = ceil(obj.imgN*obj.os/2)*2; % Make a factor of 2
 			% Minimize number of prime factors
-			for nD=1:length(obj.osN)
+            for nD=1:length(obj.osN)
 				while (max(factor(obj.osN(nD))) > 7)
 					obj.osN(nD) = obj.osN(nD) + 2;
 				end
@@ -251,25 +256,20 @@ classdef nufftOp
             nonCartInds = repmat(nonCartInds, [1 obj.kwidth^length(obj.imgN)]);
             obj.convMat = sparse(nonCartInds(:),cartInds(:),C(:),size(kloc_a,1),prod(obj.osN)); 
             if obj.nofftShift  
-                % Perform image domain fftshift simultaneously with convolution operation in k-space
-                fftShiftMat = (0:obj.osN(1)-1)';
+                % Perform image domain fftshift using phase ramp in k-space
+                % We also account for non-symmetric zero padding used by
+                %   fft and ifft fcns
+                fftShiftMat = -((0:obj.osN(1)-1)' - obj.osN(1)/2) * obj.imgN(1)/obj.osN(1);
                 if length(obj.imgN)>1
-                    fftShiftMat = repmat(fftShiftMat, [1 obj.osN(2)]) + (0:obj.osN(2)-1);
+                    fftShiftMat = repmat(fftShiftMat, [1 obj.osN(2)]) -...
+                        ((0:obj.osN(2)-1) - obj.osN(2)/2) * obj.imgN(2)/obj.osN(2);
                 end
                 if length(obj.imgN)>2
-                    fftShiftMat = repmat(fftShiftMat, [1 1 obj.osN(3)]) + reshape(0:obj.osN(3)-1, [1 1 obj.osN(3)]);
+                    fftShiftMat = repmat(fftShiftMat, [1 1 obj.osN(3)]) -...
+                        reshape((0:obj.osN(3)-1) - obj.osN(3)/2, [1 1 obj.osN(3)]) * obj.imgN(3)/obj.osN(3);
                 end
                 fftShiftMat = exp(1i*pi*fftShiftMat);
-                fftShiftMat = gather(fftShiftMat);
-                fftShiftMat = spdiags(fftShiftMat(:), 0, numel(fftShiftMat), numel(fftShiftMat));
-                if obj.useGPU
-                    fftShiftMat = gpuArray(fftShiftMat);
-                end
-                % Used complex values to simplify generation of
-                % fftShiftMat. Now we make it real again.
-                fftShiftMat = round(real(fftShiftMat)); 
-                obj.convMat = obj.convMat*fftShiftMat;
-                clear fftShiftMat
+                obj.fftShiftArray = fftShiftMat;
             end
 		end
 
@@ -333,7 +333,16 @@ classdef nufftOp
                 y_a = getSub(x,loopDim_pre,nR);
                 wasNotGpu = false;
                 if obj.useGPU && ~isa(x, 'gpuArray')
-                    y_a = gpuArray(y_a);
+                    try
+                        y_a = gpuArray(y_a);
+                    catch ME
+                        if contains(ME.message, 'memory') || strcmp(ME.identifier, 'MATLAB:array:SizeLimitExceeded')
+                            msg = 'Set nufftOp option loopDim to a smaller value if out of memory (e.g., S = nufftOp(...); S.loopDim = 2;)';
+                            causeException = MException('MATLAB:sampHighOrder:memory',msg);
+                            ME = addCause(ME,causeException);
+                        end
+                        rethrow(ME);
+                    end
                     wasNotGpu = true;
                 end
                 if obj.isToep
@@ -349,11 +358,19 @@ classdef nufftOp
                         end
                         y_a = obj.convMat'*y_a(:,:); 
                         y_a = reshape(y_a, [obj.osN,NextraInloop]);
-                        y_a = fftnc(y_a,length(obj.imgN),~obj.nofftShift);
-                        for nD=1:length(obj.imgN)
-                            % Crop away oversampling
-                            y_a = padcrop(y_a,obj.imgN(nD),nD);
+                        if ~isempty(obj.fftShiftArray)
+                            y_a = y_a.*conj(obj.fftShiftArray);
                         end
+                        y_a = fftnc(y_a,length(obj.imgN),~obj.nofftShift);
+                        sz_a = [size(y_a),1,1,1,1];
+                        y_a = y_a(1:obj.imgN(1),:,:,:);
+                        if length(obj.imgN)>1
+                            y_a = y_a(:,1:obj.imgN(2),:,:);
+                        end
+                        if length(obj.imgN)>2
+                            y_a = y_a(:,:,1:obj.imgN(3),:);
+                        end
+                        y_a = reshape(y_a, [obj.imgN, sz_a(length(obj.imgN)+1:end)]);
                         for nD=1:length(obj.imgN)
                             % Apply compensation for kernel transfer fcn
                             y_a = y_a.*obj.comp{nD};
@@ -364,13 +381,10 @@ classdef nufftOp
                             % Precompensation is separable
                             y_a = y_a.*obj.comp{nD};
                         end
-                        for nD=1:length(obj.imgN)
-                            % Zero-pad
-                            % TODO: for some reason this is strangely
-                            % expensive for GPU
-                            y_a = padcrop(y_a,obj.osN(nD),nD);
+                        y_a = ifftnc(y_a,length(obj.imgN),~obj.nofftShift,1,obj.osN);
+                        if ~isempty(obj.fftShiftArray)
+                            y_a = y_a.*obj.fftShiftArray;
                         end
-                        y_a = ifftnc(y_a,length(obj.imgN),~obj.nofftShift);
                         y_a = reshape(y_a,prod(obj.osN),[]);
                         y_a = obj.convMat*y_a(:,:);
                         y_a = reshape(y_a,[size(obj.kloc,1),NextraInloop]);
@@ -475,6 +489,12 @@ function out = getSub(in,ND,n)
         out = in(:,:,:,n);
     case 4
         out = in(:,:,:,:,n);
+    case 5
+        out = in(:,:,:,:,:,n);
+    case 6
+        out = in(:,:,:,:,:,:,n);
+    otherwise
+        error('loopDim too high')
 	end
 end
 
@@ -488,5 +508,11 @@ function out = setSub(out,in,ND,n)
         out(:,:,:,n) = in;
     case 4
         out(:,:,:,:,n) = in;
+    case 5
+        out(:,:,:,:,:,n) = in;
+    case 6
+        out(:,:,:,:,:,:,n) = in;
+    otherwise
+        error('loopDim too high')
 	end
 end

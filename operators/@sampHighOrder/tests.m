@@ -4,30 +4,61 @@ N0 = 128;
 useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
 useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
 
-%% Check adjoint for basic case
-imN = [N0 N0];
-b0 = randn(imN) + rand;
-imk = [N0 1];
-sampTimes = randn(imk)/sqrt(prod(imk));
-phs_spha = randn([16, size(sampTimes)]);
-phs_coco = randn([4, size(sampTimes)]);
-phs_grid.x = randn(size(b0));
-phs_grid.y = randn(size(b0));
-phs_grid.z = randn(size(b0));
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
-x = randn(imN) + randn;
-y = randn(imk) + randn;
-Sx = S*x;
-Sy = S'*y;
-d1 = dot(x(:),Sy(:));
-d2 = dot(Sx(:),y(:));
-assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
+%% Check adjoint for basic case for 1D through 3D
+for nd = 1:3
+    imN = [round(N0^(2/nd))*ones(1,nd), 1];
+    imk = [round(N0^(1/nd))*ones(1,nd), 1];
+    b0 = randn(imN) + rand;
+    sampTimes = randn(imk)/sqrt(prod(imk));
+    phs_spha = randn([16, imk]);
+    phs_coco = randn([4, imk]);
+    phs_grid.x = randn(size(b0));
+    phs_grid.y = randn(size(b0));
+    phs_grid.z = randn(size(b0));
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
+    x = randn([imN,2]) + randn; % include repetitions for multichannel inputs
+    y = randn([imk,2]) + randn; % include repetitions for multichannel inputs
+    Sx = S*x;
+    Sy = S'*y;
+    d1 = dot(x(:),Sy(:));
+    d2 = dot(Sx(:),y(:));
+    assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Adjoint test failed.')
 
-% Confirm that method without precomputations is equivalent
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
-Sx2 = S*x;
-Sy2 = S'*y;
-assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+    % Confirm that segmented approach is equivalent
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    Sx2 = S*x;
+    Sy2 = S'*y;
+    assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Segmented test failed.')
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
+    Sx2 = S*x;
+    Sy2 = S'*y;
+    assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
+    clear S
+    
+    % Confirm that phidiv gives same results for all cases
+    sz_zp = size(phs_spha);
+    sz_zp(2) = 1;
+    dphs_spha = diff(cat(2,zeros(sz_zp, 'like', phs_spha),phs_spha),1,2);
+    sz_zc = size(phs_coco);
+    sz_zc(2) = 1;
+    dphs_coco = diff(cat(2,zeros(sz_zc, 'like', phs_coco),phs_coco),1,2);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],0);
+    S = S.setPhiDiv(dphs_spha,dphs_coco);
+    Sx2_0 = S*x;
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    S = S.setPhiDiv(dphs_spha,dphs_coco);
+    Sx2_1 = S*x;
+    assert(norm(Sx2_0(:)-Sx2_1(:)) < 1e-8, 'Phidiv test failed, seg1.')
+    clear S
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
+    S = S.setPhiDiv(dphs_spha,dphs_coco);
+    Sx2_2 = S*x;
+    assert(norm(Sx2_0(:)-Sx2_2(:)) < 1e-8, 'Phidiv test failed, seg2.')
+    clear S
+end
 
 %% Test interpolation. Use random polynomials to simulate slow variations
 kloc = projection(N0,N0-4,2);
@@ -87,11 +118,18 @@ for orient=1:4
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
     Sx = S*xvec;
     Sy = S'*yvec(:);
-    %     tic1 = tic;
-    %     for n=1:10
-    %         Sx = S*x;
-    %     end
-    %     toc1 = toc(tic1)
+    if (0) % phidiv not yet implemented for interp method
+        % Test phidiv
+        sz_zp = size(phs_spha);
+        sz_zp(2) = 1;
+        dphs_spha = diff(cat(2,zeros(sz_zp, 'like', phs_spha),phs_spha),1,2);
+        sz_zc = size(phs_coco);
+        sz_zc(2) = 1;
+        dphs_coco = diff(cat(2,zeros(sz_zc, 'like', phs_coco),phs_coco),1,2);
+        S = S.setPhiDiv(dphs_spha,dphs_coco);
+        Sx_phidiv = S*xvec;
+    end
+    %
     S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01);
     Sx_b = S*xvec;
     Sy_b = S'*yvec(:);
