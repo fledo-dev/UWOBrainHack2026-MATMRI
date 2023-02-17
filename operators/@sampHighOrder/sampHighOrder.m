@@ -69,6 +69,7 @@ classdef sampHighOrder
                           %   2: use segmented with no precomputation at all. Slowest option, but least memory.
         svdThresh = 0.05; % Threshold for svd used in interpolated method
         subFact = 5;      % Factor to subsample in time by for interpolated approach
+        subFactSpc = 1;   % Factor to subsample in space by for interpolated approach
 	end
 
 	properties (SetAccess = protected)
@@ -100,7 +101,7 @@ classdef sampHighOrder
 
 	methods
 
-		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFact,useSegmented)
+		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFacts,useSegmented)
 			if nargin == 0
 				obj.tests;
 				return;
@@ -159,8 +160,11 @@ classdef sampHighOrder
                 if nargin>9 && ~isempty(svdThresh)
                     obj.svdThresh = svdThresh;
                 end
-                if nargin>10 && ~isempty(subFact)
-                    obj.subFact = subFact;
+                if nargin>10 && ~isempty(subFacts)
+                    obj.subFact = subFacts(1);
+                    if numel(subFacts)>1
+                        obj.subFactSpc = subFacts(2);
+                    end
                 end
                 if nargin>11 && ~isempty(useSegmented)
                     obj.useSegmented = useSegmented;
@@ -220,7 +224,7 @@ classdef sampHighOrder
                 obj.b0mask = single(obj.b0mask);
 			end
             % Move variables to GPU
-			if obj.useGPU && ~obj.useInterp
+			if obj.useGPU 
 				obj.sampTimes = gpuArray(obj.sampTimes);
 				obj.phs_spha = gpuArray(obj.phs_spha);
 				obj.phs_conc = gpuArray(obj.phs_conc);
@@ -276,30 +280,28 @@ classdef sampHighOrder
             else
                 x_a = x;
             end
-            y = 0;
+            nbins = size(obj.svdTime,2);
             if obj.adjoint 
                 NRep = numel(x_a)/prod(obj.kSize);
                 x_a = reshape(x_a, [obj.kSize, NRep]);
-                for l = 1:size(obj.svdSpace,2)
-                    y_a = x_a.*conj(reshape(obj.svdTime(:,l), [obj.kSize, 1])); 
-                    y_a = conj(obj.phsShft).*y_a;
-                    y_a = obj.traj'*y_a;
-                    y_a = y_a.*conj(reshape(obj.svdSpace(:,l),size(obj.b0)));
-                    y = y + reshape(y_a, [obj.imSize, szx(obj.NDimk+1:end)]);
-                end
+                y = x_a.*conj(reshape(obj.svdTime, [obj.kSize,1,nbins])); 
+                y = conj(obj.phsShft).*y;
+                y = obj.traj'*y;
+                y = y.*conj(reshape(obj.svdSpace, [obj.imSize,1,nbins]));
+                y = sum(y,ndims(y));
+                y = reshape(y, [obj.imSize, szx(obj.NDimk+1:end)]);
             else
                 if ~isempty(obj.ksphaDiv)
                     error('phiDiv not yet implemented for interpolated approach')
                 end
                 NRep = numel(x_a)/prod(obj.imSize);
-                x_a = reshape(x_a, [obj.imSize, NRep]);                    
-                for l = 1:size(obj.svdSpace,2)
-                    y_a = x_a.*reshape(obj.svdSpace(:,l),size(obj.b0));
-                    y_a = obj.traj*y_a;
-                    y_a = obj.phsShft.*reshape(y_a, [obj.kSize, NRep]);
-                    y_a = y_a.*reshape(obj.svdTime(:,l), [obj.kSize, 1]); 
-                    y = y + reshape(y_a, [obj.kSize, szx(obj.NDim+1:end)]);
-                end
+                x_a = reshape(x_a, [obj.imSize, NRep]);  
+                y = x_a.*reshape(obj.svdSpace, [obj.imSize,1,nbins]);
+                y = obj.traj*y;
+                y = obj.phsShft.*reshape(y, [obj.kSize,NRep,nbins]);
+                y = y.*reshape(obj.svdTime, [obj.kSize,1,nbins]);
+                y = sum(y,ndims(y));
+                y = reshape(y, [obj.kSize, szx(obj.NDim+1:end)]);
             end
             if ~isa(x,'gpuArray')
                 y = gather(y);
@@ -441,7 +443,7 @@ classdef sampHighOrder
             end
         end
 
-		function kbase = prepForDirect(obj,phs_spha_a,phs_conc_a,sampTimes_a,sphaInds,subIndsSpace,subIndsTime)
+		function kbase = prepForDirect(obj,phs_spha_a,phs_conc_a,sampTimes_a,sphaInds,subIndsSpace,subIndsTime,subIndsSpaceDirect,subIndsTimeDirect)
             if nargin<5 || isempty(sphaInds)
                 sphaInds = 1:size(obj.phs_spha,1);
             end
@@ -451,11 +453,23 @@ classdef sampHighOrder
             if nargin<7 || isempty(subIndsTime)
                 subIndsTime = [];
             end
+            if nargin<8 
+                subIndsSpaceDirect = [];
+            end
+            if nargin<9 
+                subIndsTimeDirect = [];
+            end
             if ~isempty(subIndsTime)
                 phs_spha_a = phs_spha_a(:,subIndsTime(1):subIndsTime(2));
                 phs_conc_a = phs_conc_a(:,subIndsTime(1):subIndsTime(2));
                 if numel(sampTimes_a)>1
                     sampTimes_a = sampTimes_a(subIndsTime(1):subIndsTime(2));
+                end
+            elseif ~isempty(subIndsTimeDirect)
+                phs_spha_a = phs_spha_a(:,subIndsTimeDirect);
+                phs_conc_a = phs_conc_a(:,subIndsTimeDirect);
+                if numel(sampTimes_a)>1
+                    sampTimes_a = sampTimes_a(subIndsTimeDirect);
                 end
             end
             if ~isempty(subIndsSpace) 
@@ -465,11 +479,25 @@ classdef sampHighOrder
                 end
                 b0_a = obj.b0(subIndsSpace(1):subIndsSpace(2));
                 b0_a = b0_a(:);
+                x = obj.phs_grid.x;
+                y = obj.phs_grid.y;
+                z = obj.phs_grid.z;
+            elseif ~isempty(subIndsSpaceDirect)
+                if ~isempty(obj.b0mask)
+                    b0mask_a = obj.b0mask(subIndsSpaceDirect);
+                end
+                b0_a = obj.b0(subIndsSpaceDirect);
+                x = obj.phs_grid.x(subIndsSpaceDirect);
+                y = obj.phs_grid.y(subIndsSpaceDirect);
+                z = obj.phs_grid.z(subIndsSpaceDirect);
             else
                 if ~isempty(obj.b0mask)
                     b0mask_a = obj.b0mask(:);
                 end
                 b0_a = obj.b0(:);
+                x = obj.phs_grid.x;
+                y = obj.phs_grid.y;
+                z = obj.phs_grid.z;
             end
 			% Vectorize time dims to a row vector to enable implicit replication when multiplying spatial dims by time dims
             if numel(sampTimes_a) > 1
@@ -481,7 +509,7 @@ classdef sampHighOrder
             phs = 0;
             for n=sphaInds
 				% Add all spatially varying spherical harmonic terms
-                bfunc = basisFuncHarm(obj.phs_grid.x,obj.phs_grid.y,obj.phs_grid.z,n,subIndsSpace);
+                bfunc = basisFuncHarm(x,y,z,n,subIndsSpace);
                 bfunc = bfunc(:);
                 if n>4 && ~isempty(obj.b0mask)
                     bfunc = bfunc.*b0mask_a;
@@ -491,7 +519,7 @@ classdef sampHighOrder
             end
             for n=1:size(phs_conc_a,1)
 				% Add all concomitant gradient terms
-                bfunc = basisFuncConc(obj.phs_grid.x,obj.phs_grid.y,obj.phs_grid.z,n,subIndsSpace);
+                bfunc = basisFuncConc(x,y,z,n,subIndsSpace);
                 bfunc = bfunc(:);
                 if ~isempty(obj.b0mask)
                     bfunc = bfunc.*b0mask_a;
@@ -606,23 +634,55 @@ classdef sampHighOrder
             phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
 			traj = nufftOp(size(obj.b0), kloc(:,:)',[],obj.useGPU);
 			clear kloc
-			% Determine full non-linear encoding matrix
-			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
-            % Sub-sample b along time dimension to speed up svd, since
-            % phase is slowly varying in time. We do not subsample in
-            % space, since high resolution is important for the B0 map
+			% Determine full non-linear encoding matrix, subsampling along
+			% time since phase is slowly varying in time. 
             if obj.subFact>1
-                inds = 1:obj.subFact:size(b,2);
-                if inds(end) ~= size(b,2)
-                    inds = [inds, size(b,2)]';
+                inds = 1:obj.subFact:numel(obj.sampTimes);
+                if inds(end) ~= numel(obj.sampTimes)
+                    % Keep the ends to avoid extrapolation
+                    inds = [inds, numel(obj.sampTimes)]';
                 end
-                b = b(:,inds);
             end
+            % We also interp in space via obj.subFactSpc, but this should
+            % be only 1 or 2.
+            indsSpc = [];
+            if obj.subFactSpc>1
+                sz = [obj.imSize,1,1];
+                indsSpc = false(sz);
+                if sz(3) > 1
+                    error('this part untested for 3D')
+                end
+                for n2 = 1:sz(2)
+                    for n3 = 1:sz(3)
+                        strt = mod(n3+mod(n2,obj.subFactSpc), obj.subFactSpc);
+                        if strt==0
+                            strt = obj.subFactSpc;
+                        end
+                        indsSpc(strt:obj.subFactSpc:end,n2,n3) = true;
+                    end
+                end
+                % Keep the ends to avoid extrapolation
+                indsSpc(1,:,:) = true;
+                indsSpc(end,:,:) = true;
+                if sz(2)>1
+                    indsSpc(:,1,:) = true;
+                    indsSpc(:,end,:) = true;
+                end
+                if sz(3)>1
+                    indsSpc(:,:,1) = true;
+                    indsSpc(:,:,end) = true;
+                end
+            end
+			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)],[],[],indsSpc,inds);
             b = exp(1i*b);
             % Find largest singular values and vectors
             S = 1;
             ntry = 0;
-            delTry = 30;
+            if obj.svdThresh < 0.055
+                delTry = 30;
+            else
+                delTry = 20;
+            end
             subspcFact = 3;
             while (min(diag(S))/max(S(:)) > obj.svdThresh) 
                 if ntry > 200
@@ -646,10 +706,40 @@ classdef sampHighOrder
             end
             Ns = find(diag(S)/max(S(:))<obj.svdThresh,1,'first');
             svdTime = conj(V(:,1:Ns)*S(1:Ns,1:Ns));
-            if obj.subFact
+            if obj.subFact > 1
+                % Fill back in values if interpolation was used
                 svdTime = interp1(inds,gather(svdTime),1:inds(end),'pchip');
             end
             svdSpace = U(:,1:Ns);
+            if obj.subFactSpc > 1
+                % Fill back in values if interpolation was used in space
+                % This is actually pretty slow, because griddata does not
+                % support GPU.
+                if length(obj.imSize) == 1
+                    warning('1D untested')
+                    indsSpc = find(indsSpc);
+                    svdSpace = interp1(indsSpc,gather(svdSpace),1:indsSpc(end),'pchip');
+                elseif length(obj.imSize) == 2
+                    [X,Y] = ndgrid(1:obj.imSize(1),1:obj.imSize(2));
+                    svdSpaceOut = zeros(prod(obj.imSize),size(svdSpace,2));
+                    for n=1:size(svdSpace,2)
+                        tmp = griddata(X(indsSpc),Y(indsSpc),gather(svdSpace(:,n)),X(:),Y(:),'natural');
+                        svdSpaceOut(:,n) = tmp(:);
+                    end
+                    svdSpace = svdSpaceOut;
+                    clear X Y svdSpaceOut
+                elseif length(obj.imSize) == 3
+                    warning('3D untested')
+                    [X,Y,Z] = ndgrid(1:obj.imSize(1),1:obj.imSize(2),1:obj.imSize(3));
+                    svdSpaceOut = zeros(prod(obj.imSize),size(svdSpace,2));
+                    for n=1:size(svdSpace,2)
+                        tmp = griddata(X(indsSpc),Y(indsSpc),Z(indsSpc),gather(svdSpace(:,n)),X(:),Y(:),Z(:),'natural');
+                        svdSpaceOut(:,n) = tmp(:);
+                    end
+                    svdSpace = svdSpaceOut;
+                    clear X Y svdSpaceOut
+                end
+            end
             clear U V
 			% Compute error wrt direct approach
 			if (0)
