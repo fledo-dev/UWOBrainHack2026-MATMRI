@@ -1,6 +1,6 @@
 function tests(obj)
 
-N0 = 128;
+N0 = 64;
 useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
 useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
 
