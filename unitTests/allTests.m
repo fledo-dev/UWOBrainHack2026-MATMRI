@@ -7,3 +7,4 @@ rcvrOp;
 mrSampFunc;
 sampHighOrder;
 dwt;
+spDiff;

@@ -1,11 +1,14 @@
-function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0,NitMax,opt)
+function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ain,bin,x0,NitMax,opt,gam,Rin)
     % Use conjugate gradient method to solve Ax = b in a least squares sense. 
     %    i.e., "conjugate gradient on the normal equations", cjne
     %
-    % x = cgne(A,b,x0,maxIterations,options)
+    % x = cgne(A,b,x0,maxIterations,options,gamma,R)
     %
     %   A must have a transpose that can be evaluated using A'*b, or as a function with A(b,'transp')
     %   A operates on x via A*x or A(x,'notransp')
+    %
+    %   gamma, R (optional): specify to perform regularization using matrix R and tuning factor gamma
+    %           solves argmin_x ||Ax - b||^2_2 + gamma||Rx||^2_2
     %
     % (c) Corey Baron 2020
     %
@@ -14,6 +17,14 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     if nargin<4 || isempty(NitMax)
         % Maximum number of iterations allowed
         NitMax = 1000;
+    end
+    if nargin<5 || ~isfield(opt,'resThresh')
+        % Iterations stop when fractional difference between residuals is less than this
+        opt.resThresh = 1e-10; 
+    end
+    if nargin<5 || ~isfield(opt,'resChangeThresh')
+        % Iterations stop when fractional difference between residuals is less than this
+        opt.resChangeThresh = 1e-10; 
     end
     if nargin<5 || ~isfield(opt,'expResN')
         % Set to non-zero to explicitely compute residual every expResN iterations. 
@@ -66,6 +77,13 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
         % Useful for simulations. Allows computation of mse per iteration
         opt.gtruth = []; 
     end
+    
+    if nargin<6 || (~isempty(gam) && all(gam == 0))
+        gam = [];
+    end
+    if nargin<7 || isempty(gam)
+        Rin = [];
+    end
 
     if (nargout > 3) 
         findxnorm = 1;
@@ -73,11 +91,18 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
         findxnorm = 0;
     end
     
-    % Account for different ways of supplying A
+    % Account for different ways of supplying A and R
     if isa(Ain,'function_handle')
         A = Ain;
     else
         A = @(x,transp) Asub(x,transp,Ain);
+    end
+    if ~isempty(Rin)
+        if isa(Rin,'function_handle')
+            R = Rin;
+        else
+            R = @(x,transp) Asub(x,transp,Rin);
+        end
     end
     
     % Set default starting guess
@@ -106,6 +131,9 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     b = A(bin,'transp');
     xold = x0;
     res = b - A(A(xold, 'notransp'), 'transp');
+    if ~isempty(gam)
+        res = res - gam.*R(R(xold, 'notransp'), 'transp');
+    end
     p = res;
     res_sq_old = res(:)' * res(:);
     nit = 0;
@@ -136,13 +164,20 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
     resIncsTotal = 0;
     xdifIncsTotal = 0;
     lastxdifInc = 0; % consider sequential climbing xdiff as a single increase
+    status = 0;
     while ~finished
         Ap = A(A(p, 'notransp'), 'transp');
+        if ~isempty(gam)
+            Ap = Ap + gam.*R(R(p, 'notransp'), 'transp');
+        end
         alph = res_sq_old / (p(:)' * Ap(:));
         x = xold + alph*p;
         if mod(nit,opt.expResN) == 0
             % Avoid accumulation of rounding errors when doing many iterations
             res = b - A(A(x, 'notransp'), 'transp');
+            if ~isempty(gam)
+                res = res - gam.*R(R(x, 'notransp'), 'transp');
+            end
             betaFact = 0;
         else
             res = res - alph*Ap;
@@ -180,20 +215,28 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
             end
         end
         % Check if converged 
-        if (res_sq_new/resSqAll(1) < 1e-10)
+        if (res_sq_new < opt.resThresh)
             % Here the residual is tiny
             finished = 1;
+            status = 1;
+        end
+        if ( abs((resSqAll(nit+2)-resSqAll(nit+1))/resSqAll(nit+1)) < opt.resChangeThresh )
+            % Here the change in residual is tiny
+            finished = 1;
+            status = 2;
         end
         if (~isempty(stopThresh) && (res_sq_new < stopThresh)) 
             % Here the residual dropped below the residual expected from
             % noise.
             NitMax = nit + opt.nseExtraIt;
             stopThresh = 0;
+            status = 3;
         end
         if opt.stopOnResInc>0 && (resSqAll(nit+2)/resSqAll(nit+1) > opt.resIncThresh)
             resIncsTotal = resIncsTotal + 1;
             if resIncsTotal >= opt.stopOnResInc
                 finished = 1;
+                status = 4;
             end
         end
         if opt.stopOnXdifInc>0 && (xdiffAll(nit+2) > xdiffAll(nit+1)) 
@@ -202,6 +245,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
                 lastxdifInc = 1;
                 if xdifIncsTotal >= opt.stopOnXdifInc
                     finished = 1;
+                    status = 5;
                 end
             end
         else
@@ -214,6 +258,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh] = cgne(Ain,bin,x0
         nit = nit+1;
         if nit >= NitMax
             finished = 1;
+            status = 0;
         end
     end
     resSqAll = resSqAll(1:(nit+1));
