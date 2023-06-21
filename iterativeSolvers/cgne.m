@@ -1,14 +1,17 @@
-function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ain,bin,x0,NitMax,opt,gam,Rin)
+function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ain,bin,x0,NitMax,opt,gam,Rin,W)
     % Use conjugate gradient method to solve Ax = b in a least squares sense. 
-    %    i.e., "conjugate gradient on the normal equations", cjne
+    %    i.e., "conjugate gradient on the normal equations", cgne
     %
-    % x = cgne(A,b,x0,maxIterations,options,gamma,R)
+    % x = cgne(A,b,x0,maxIterations,options,gamma,R,W)
     %
     %   A must have a transpose that can be evaluated using A'*b, or as a function with A(b,'transp')
     %   A operates on x via A*x or A(x,'notransp')
     %
     %   gamma, R (optional): specify to perform regularization using matrix R and tuning factor gamma
-    %           solves argmin_x ||Ax - b||^2_2 + gamma||Rx||^2_2
+    %           solves argmin_x ||sqrt(W)(Ax - b)||^2_2 + gamma||Rx||^2_2
+    %
+    %   W (optional): allows weighting data consistency cost.
+    %       e.g., density compensation based weighting, Magn Reson Med. 2018 May; 79(5): 2685–2692
     %
     % (c) Corey Baron 2020
     %
@@ -19,12 +22,17 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         NitMax = 1000;
     end
     if nargin<5 || ~isfield(opt,'resThresh')
-        % Iterations stop when fractional difference between residuals is less than this
+        % Iterations stop when squared residual is less than this
         opt.resThresh = 1e-10; 
     end
     if nargin<5 || ~isfield(opt,'resChangeThresh')
         % Iterations stop when fractional difference between residuals is less than this
-        opt.resChangeThresh = 1e-10; 
+        opt.resChangeThresh = []; 
+    end
+    if nargin<5 || ~isfield(opt,'xChangeThresh')
+        % Iterations stop when square of l2 norm of difference of x
+        % between iterations is less than this.
+        opt.xChangeThresh = 1e-10; 
     end
     if nargin<5 || ~isfield(opt,'expResN')
         % Set to non-zero to explicitely compute residual every expResN iterations. 
@@ -84,11 +92,17 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
     if nargin<7 || isempty(gam)
         Rin = [];
     end
+    if nargin<8 || isempty(W)
+        W = [];
+    end
 
-    if (nargout > 3) 
+    findxnorm = 0;
+    findxdiff = 0;
+    if (nargout > 3) || ~isempty(opt.xChangeThresh)
         findxnorm = 1;
-    else
-        findxnorm = 0;
+    end
+    if (nargout > 4) || ~isempty(opt.xChangeThresh) || (opt.stopOnXdifInc>0) || opt.plotting
+        findxdiff = 1;
     end
     
     % Account for different ways of supplying A and R
@@ -105,9 +119,16 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         end
     end
     
+    % Get RHS for normal equations
+    if ~isempty(W)
+        b = A(W.*bin,'transp');
+    else
+        b = A(bin,'transp');
+    end
+
     % Set default starting guess
     if nargin<3 || isempty(x0)
-        x0 = A(bin,'transp');
+        x0 = b;
     end
 
     % Prep for stopping based on measured noise
@@ -128,9 +149,12 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
     end
     
     % Initialize first iteration
-    b = A(bin,'transp');
     xold = x0;
-    res = b - A(A(xold, 'notransp'), 'transp');
+    if ~isempty(W)
+        res = b - A(W.*A(xold, 'notransp'), 'transp');
+    else
+        res = b - A(A(xold, 'notransp'), 'transp');
+    end
     if ~isempty(gam)
         res = res - gam.*R(R(xold, 'notransp'), 'transp');
     end
@@ -154,7 +178,9 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         xnormAll(1) = x0(:)'*x0(:);
     end
     xdiffAll = zeros(NitMax+1,1);
-    xdiffAll(1) = xnormAll(1);
+    if findxdiff
+        xdiffAll(1) = xnormAll(1);
+    end
     mseAll = zeros(NitMax+1,1);
     if ~isempty(opt.gtruth)
         tmp = opt.gtruth(:)-x0(:);
@@ -166,7 +192,11 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
     lastxdifInc = 0; % consider sequential climbing xdiff as a single increase
     status = 0;
     while ~finished
-        Ap = A(A(p, 'notransp'), 'transp');
+        if ~isempty(W)
+            Ap = A(W.*A(p, 'notransp'), 'transp');
+        else
+            Ap = A(A(p, 'notransp'), 'transp');
+        end
         if ~isempty(gam)
             Ap = Ap + gam.*R(R(p, 'notransp'), 'transp');
         end
@@ -174,7 +204,11 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         x = xold + alph*p;
         if mod(nit,opt.expResN) == 0
             % Avoid accumulation of rounding errors when doing many iterations
-            res = b - A(A(x, 'notransp'), 'transp');
+            if ~isempty(W)
+                res = b - A(W.*A(x, 'notransp'), 'transp');
+            else
+                res = b - A(A(x, 'notransp'), 'transp');
+            end
             if ~isempty(gam)
                 res = res - gam.*R(R(x, 'notransp'), 'transp');
             end
@@ -183,13 +217,16 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
             res = res - alph*Ap;
             betaFact = 1;
         end
+        % Tracking progress
         res_sq_new = res(:)' * res(:);
         resSqAll(nit+2) = res_sq_new; 
         if findxnorm
             xnormAll(nit+2) = x(:)'*x(:);
         end
-        xdiff = x-xold;
-        xdiffAll(nit+2) = xdiff(:)'*xdiff(:);
+        if findxdiff
+            xdiff = x-xold;
+            xdiffAll(nit+2) = xdiff(:)'*xdiff(:);
+        end
         if ~isempty(opt.gtruth)
             tmp = opt.gtruth(:)-x(:);
             mseAll(nit+2) = tmp'*tmp;
@@ -215,12 +252,17 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
             end
         end
         % Check if converged 
-        if (res_sq_new < opt.resThresh)
+        if ~isempty(opt.xChangeThresh) && (xdiffAll(nit+2) < opt.xChangeThresh)
+            % Here the change in x is tiny
+            finished = 1;
+            status = 10;
+        end
+        if ~isempty(opt.resThresh) && (res_sq_new < opt.resThresh)
             % Here the residual is tiny
             finished = 1;
             status = 1;
         end
-        if ( abs((resSqAll(nit+2)-resSqAll(nit+1))/resSqAll(nit+1)) < opt.resChangeThresh )
+        if ~isempty(opt.resChangeThresh) && ( abs((resSqAll(nit+2)-resSqAll(nit+1))/resSqAll(nit+1)) < opt.resChangeThresh )
             % Here the change in residual is tiny
             finished = 1;
             status = 2;
@@ -264,7 +306,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
     resSqAll = resSqAll(1:(nit+1));
     xnormAll = xnormAll(1:(nit+1));
     mseAll = mseAll(1:(nit+1));
-    
+    xdiffAll = xdiffAll(1:(nit+1));
 end
 
 function y = Asub(x,transp,Ain)

@@ -37,7 +37,8 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
         delJumpFact = 3;
     end
     
-    fprintf('findDelAuto:\n')
+    tic1 = tic;
+    fprintf('findDelAuto: Init guess %.2f; ', delSk0)
     
     % Basic prep computations
     numsamps = numCoarseSearch; % number of samples to try in initial course search
@@ -54,7 +55,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
     % Peform course search
     resvec_min = inf;
     if numCoarseSearch > 0
-        fprintf('    Course search (N=%d)', 2*numsamps+1);
+        fprintf('coarse search (N=%d)', 2*numsamps+1);
         for courseTest = -numsamps:numsamps
             % Interpolate to match datatimes
             delSk = delSk0+courseTest*dtsamp;
@@ -72,7 +73,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
             end
             fprintf('.');
         end
-        fprintf('diff in delay from initial guess after course search: %.1f\n', delSk_min-delSk0)
+        fprintf(' %.2f; ', delSk_min)
         delSk = delSk_min;
     else
         delSk = delSk0;
@@ -82,7 +83,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
     ntry = 0;
     delChange = inf;
     delThresh = 0.005; % us
-    fprintf('    diff in del from initial guess per iteration: ');
+    fprintf('iterations...');
     delSk_perIt = zeros(1000,1);
     delSk_perIt(1) = delSk;
     while abs(delChange) > delThresh
@@ -110,7 +111,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
         delChange = bhathat(:)\bhat(:);
         delChange = delJumpFact*real(delChange);
         delSk = delSk + delChange;
-        fprintf('  %.2f', delSk - delSk0)
+        fprintf(' %.2f,', delSk)
         if (ntry>0) && (sign(delChangePrev) ~= sign(delChange)) && (delJumpFact>1)
             delJumpFact = delJumpFact/2;
         end
@@ -118,10 +119,10 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
         ntry = ntry+1;
         delSk_perIt(ntry+1) = delSk;
         if ntry > 50
-            warning('findDel did not converge after %d iterations\n', ntry)
+            warning('did not converge after %d iterations\n', ntry)
             break;
         end
     end
     delSk_perIt = delSk_perIt(1:ntry+1);
-    fprintf('\n    Done\n');
+    fprintf(' done in %d sec\n', round(toc(tic1)));
 end
