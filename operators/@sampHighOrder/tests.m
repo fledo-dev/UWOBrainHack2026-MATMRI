@@ -68,8 +68,8 @@ dx = 0.8;
 dy = 0.95;
 kloc(:,1) = 2*pi*kloc(:,1)/max(abs(kloc(:,1)))/2/dx;
 kloc(:,2) = 2*pi*kloc(:,2)/max(abs(kloc(:,2)))/2/dy;
-x = (x+1)*dx;
-y = (y+1)*dy;
+x = (x+3)*dx; % Shift grid to test how that is handled
+y = (y-2)*dy;
 scl = 0.5*max(abs(x(:)));
 b0 = scl^5*(randn*x + randn*y) + ...
     scl*(randn*x.^4 + randn*(x.^3).*y + randn*(x.^2).*(y.^2) + randn*x.*(y.^3) + randn*y.^4) +...
@@ -164,6 +164,30 @@ d2 = dot(Sx_b(:),yvec(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-5, 'Interp adjoint test failed.')
 assert(isa(Sx_b, 'single'), 'Interp single precision failed.')
 
+% Test interp with SMS-like acquisition (3D input, but too small to do
+% nufft on 3rd dim)
+subFactTime = 1; % z-encoding for SMS can make subsampling introduce large errors
+b0 = cat(3,b0,0.5*b0);
+phs_grid.x = repmat(phs_grid.x,[1 1 2]);
+phs_grid.y = repmat(phs_grid.y,[1 1 2]);
+phs_grid.z = cat(3,-0.3*phs_grid.z,0.7*phs_grid.z);
+dz = phs_grid.z(1,1,2)-phs_grid.z(1,1,1);
+phs_spha(4,:) = pi/dz*sin(4.8*(1:size(phs_spha,2))/N0);
+xvec = cat(3, xvec, padcrop(phantom(round(N0/2)), size(xvec)));
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
+Sx = S*xvec;
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01,subFactTime);
+Sx_b = S*xvec;
+cost = Sx(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp comparison to direct for SMS failed.')
+xvec = repmat(xvec, [1 1 1 2]); % Include repetitions
+Sx_b = S*xvec;
+yvec = randn(size(Sx_b));
+Sy_b = S'*yvec;
+d1 = dot(xvec(:),Sy_b(:));
+d2 = dot(Sx_b(:),yvec(:));
+assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Interp adjoint test failed.')
 
 
 %% Check adjoint for larger im dims

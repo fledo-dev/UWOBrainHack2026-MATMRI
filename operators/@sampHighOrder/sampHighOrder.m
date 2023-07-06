@@ -70,6 +70,7 @@ classdef sampHighOrder
         svdThresh = 0.05; % Threshold for svd used in interpolated method
         subFact = 5;      % Factor to subsample in time by for interpolated approach
         subFactSpc = 1;   % Factor to subsample in space by for interpolated approach
+        num3DSlc = 32;  % Number of slices required to do interpolation on 3rd dim (only for interpolated approach)
 	end
 
 	properties (SetAccess = protected)
@@ -287,6 +288,10 @@ classdef sampHighOrder
                 y = x_a.*conj(reshape(obj.svdTime, [obj.kSize,1,nbins])); 
                 y = conj(obj.phsShft).*y;
                 y = obj.traj'*y;
+                if (length(obj.imSize)>2) && (obj.imSize(3)>1) && (obj.imSize(3)<obj.num3DSlc)
+                    % SMS-like
+                    y = reshape(y, [obj.imSize(1:2), 1, NRep, nbins])/sqrt(2);
+                end
                 y = y.*conj(reshape(obj.svdSpace, [obj.imSize,1,nbins]));
                 y = sum(y,ndims(y));
                 y = reshape(y, [obj.imSize, szx(obj.NDimk+1:end)]);
@@ -297,6 +302,10 @@ classdef sampHighOrder
                 NRep = numel(x_a)/prod(obj.imSize);
                 x_a = reshape(x_a, [obj.imSize, NRep]);  
                 y = x_a.*reshape(obj.svdSpace, [obj.imSize,1,nbins]);
+                if (length(obj.imSize)>2) && (obj.imSize(3)>1) && (obj.imSize(3)<obj.num3DSlc)
+                    % SMS-like
+                    y = sum(y,3)/sqrt(2);
+                end
                 y = obj.traj*y;
                 y = obj.phsShft.*reshape(y, [obj.kSize,NRep,nbins]);
                 y = y.*reshape(obj.svdTime, [obj.kSize,1,nbins]);
@@ -581,72 +590,94 @@ classdef sampHighOrder
 		
 		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
 			% Create nufft object
+            % TODO: subsampling rates could be automatically determined by
+            % difference between subsampled-then-interpolated and GT
+            % TODO: subsampling should use fourier domain subsampling
+            % followed by zero filling, since these should be close to band
+            % limited (both space and time).
 			% TODO: below assumes perfectly axial slices. To do this properly, need to:
 			% 1. have normal vector to slice as an optional input
 			% 2. find linear combination of terms 2:4 in kspha for in-plane to slice
 			% 3. set that to kloc, and substract from kspha. Then can still have all kspha terms in sum below
-            if (obj.NDim ~= 2)
-                error('Interpolation currently only supported for 2D in object domain')
-            end
+            sz_nufft = size(obj.phs_grid.x);
+            sz_nufft = sz_nufft(1:2); % assume 2D for now. 3D is handled later
             sz_spha = size(obj.phs_spha);
             kloc = zeros([2,sz_spha(2:end)], 'like', obj.phs_spha);
-            if abs(obj.phs_grid.z(2,2)-obj.phs_grid.z(1,1)) ~= 0
+            if abs(obj.phs_grid.z(2,2,1)-obj.phs_grid.z(1,1,1)) ~= 0
                 error('non-axial slices not supported for interpolated approach')
             end
-            if abs(obj.phs_grid.x(1,2)-obj.phs_grid.x(1,1)) > eps
-                if abs(obj.phs_grid.y(1,2)-obj.phs_grid.y(1,1)) ~= 0
+            if abs(obj.phs_grid.x(1,2,1)-obj.phs_grid.x(1,1,1)) > eps
+                if abs(obj.phs_grid.y(1,2,1)-obj.phs_grid.y(1,1,1)) ~= 0
                     error('non-axial slices not supported for interpolated approach')
                 end
-                res1 = abs(obj.phs_grid.y(2,1)-obj.phs_grid.y(1,1));
-                res2 = abs(obj.phs_grid.x(1,2)-obj.phs_grid.x(1,1));
-                if obj.phs_grid.y(2,1)-obj.phs_grid.y(1,1) > 0
+                res1 = abs(obj.phs_grid.y(2,1,1)-obj.phs_grid.y(1,1,1));
+                res2 = abs(obj.phs_grid.x(1,2,1)-obj.phs_grid.x(1,1,1));
+                if obj.phs_grid.y(2,1,1)-obj.phs_grid.y(1,1,1) > 0
                     kloc(1,:) = obj.phs_spha(3,:)/2/pi*res1;
                 else
                     kloc(1,:) = -obj.phs_spha(3,:)/2/pi*res1;
                 end
-                if obj.phs_grid.x(1,2)-obj.phs_grid.x(1,1) > 0
+                if obj.phs_grid.x(1,2,1)-obj.phs_grid.x(1,1,1) > 0
                     kloc(2,:) = obj.phs_spha(2,:)/2/pi*res2;
                 else
                     kloc(2,:) = -obj.phs_spha(2,:)/2/pi*res2;
                 end
                 % Create phase ramp to center object domain properly, since
                 % nufft assumes isocenter is at matrix center
-                phsShft = obj.phs_grid.y(end/2+1,1)*obj.phs_spha(3,:) + ...
-                    obj.phs_grid.x(1,end/2+1)*obj.phs_spha(2,:);
+                phsShft = obj.phs_grid.y(end/2+1,1,1)*obj.phs_spha(3,:) + ...
+                    obj.phs_grid.x(1,end/2+1,1)*obj.phs_spha(2,:);
             else
-                res1 = abs(obj.phs_grid.x(2,1)-obj.phs_grid.x(1,1));
-                res2 = abs(obj.phs_grid.y(1,2)-obj.phs_grid.y(1,1));
-                if obj.phs_grid.x(2,1)-obj.phs_grid.x(1,1) > 0
+                res1 = abs(obj.phs_grid.x(2,1,1)-obj.phs_grid.x(1,1,1));
+                res2 = abs(obj.phs_grid.y(1,2,1)-obj.phs_grid.y(1,1,1));
+                if obj.phs_grid.x(2,1,1)-obj.phs_grid.x(1,1,1) > 0
                     kloc(1,:) = obj.phs_spha(2,:)/2/pi*res1;
                 else
                     kloc(1,:) = -obj.phs_spha(2,:)/2/pi*res1;
                 end
-                if obj.phs_grid.y(1,2)-obj.phs_grid.y(1,1) > 0
+                if obj.phs_grid.y(1,2,1)-obj.phs_grid.y(1,1,1) > 0
                     kloc(2,:) = obj.phs_spha(3,:)/2/pi*res2;
                 else
                     kloc(2,:) = -obj.phs_spha(3,:)/2/pi*res2;
                 end
                 % Create phase ramp to center object domain properly, since
                 % nufft assumes isocenter is at matrix center
-                phsShft = obj.phs_grid.x(end/2+1,1)*obj.phs_spha(2,:) + ...
-                    obj.phs_grid.y(1,end/2+1)*obj.phs_spha(3,:);
+                phsShft = obj.phs_grid.x(end/2+1,1,1)*obj.phs_spha(2,:) + ...
+                    obj.phs_grid.y(1,end/2+1,1)*obj.phs_spha(3,:);
             end
+            % Account for 3D. Note that you need enough voxels in z for
+            % kernel convolution in nufft 
+            strtIndSpha = 4;
+            if size(obj.phs_grid.x,3) >= obj.num3DSlc
+                strtIndSpha = 5;
+                res3 = abs(obj.phs_grid.z(1,1,2)-obj.phs_grid.z(1,1,1));
+                if obj.phs_grid.z(1,1,2)-obj.phs_grid.z(1,1,2) > 0
+                    kloc = cat(1, kloc,  obj.phs_spha(4,:)/2/pi*res3);
+                else
+                    kloc = cat(1, kloc, -obj.phs_spha(4,:)/2/pi*res3);
+                end
+                phsShft = phsShft + obj.phs_grid.z(1,1,end/2+1)*obj.phs_spha(4,:);
+                sz_nufft = size(obj.phs_grid.x);
+                error('3D has not been tested')
+            end
+            % Create nufft object
             phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
-			traj = nufftOp(size(obj.b0), kloc(:,:)',[],obj.useGPU);
+			traj = nufftOp(sz_nufft, kloc(:,:)',[],obj.useGPU);
 			clear kloc
 			% Determine full non-linear encoding matrix, subsampling along
 			% time since phase is slowly varying in time. 
-            if obj.subFact>1
-                inds = 1:obj.subFact:numel(obj.sampTimes);
-                if inds(end) ~= numel(obj.sampTimes)
-                    % Keep the ends to avoid extrapolation
-                    inds = [inds, numel(obj.sampTimes)]';
-                end
+            inds = 1:obj.subFact:numel(obj.sampTimes);
+            if inds(end) ~= numel(obj.sampTimes)
+                % Keep the ends to avoid extrapolation
+                inds = [inds, numel(obj.sampTimes)]';
             end
             % We also interp in space via obj.subFactSpc, but this should
             % be only 1 or 2.
             indsSpc = [];
             if obj.subFactSpc>1
+                % TODO: probably best to subsample B0 map using k-space
+                % (can even filter to reduce ringing), and then zero-fill
+                % to recover. B0 is pretty slowly varying anyway, and can
+                % allow fractional rates.
                 sz = [obj.imSize,1,1];
                 indsSpc = false(sz);
                 if sz(3) > 1
@@ -673,7 +704,7 @@ classdef sampHighOrder
                     indsSpc(:,:,end) = true;
                 end
             end
-			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)],[],[],indsSpc,inds);
+			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,strtIndSpha:size(obj.phs_spha,1)],[],[],indsSpc,inds);
             b = exp(1i*b);
             % Find largest singular values and vectors
             S = 1;
@@ -744,7 +775,7 @@ classdef sampHighOrder
 			% Compute error wrt direct approach
 			if (0)
 				erVal = gather(svdSpace)*gather(svdTime.');
-				b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,4:size(obj.phs_spha,1)]);
+				b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,strtIndSpha:size(obj.phs_spha,1)]);
 				b = reshape(b, numel(obj.b0), numel(obj.sampTimes));
                 b = exp(1i*b);
                 erVal = erVal(:) - gather(b(:));
