@@ -1,5 +1,7 @@
 function tests(obj)
 
+rng(1)
+
 N0 = 64;
 useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
 useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
@@ -154,7 +156,9 @@ end
 S = sampHighOrder(b0,reshape(sampTimes,[],2),reshape(phs_spha,size(phs_spha,1),[],2),...
     reshape(phs_coco,size(phs_coco,1),[],2),phs_grid,[],useGPU,useSingle,1,0.01);
 Sx_b2 = S*xvec;
-assert(sum(abs(Sx_b2(:)-Sx_b)) < 1e-8, 'Interp sampTimes ND test failed.')
+cost = Sx_b2(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp sampTimes ND test failed.')
 % Test single precision for interp option
 S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,1,1,0.01);
 Sx_b = S*xvec;
@@ -166,7 +170,7 @@ assert(isa(Sx_b, 'single'), 'Interp single precision failed.')
 
 % Test interp with SMS-like acquisition (3D input, but too small to do
 % nufft on 3rd dim)
-subFactTime = 1; % z-encoding for SMS can make subsampling introduce large errors
+subFactTime = 2; % z-encoding for SMS can make aggressive subsampling introduce errors, so decrease it here. Note that 5 is likely still okay for real data - this sim has rapid variation
 b0 = cat(3,b0,0.5*b0);
 phs_grid.x = repmat(phs_grid.x,[1 1 2]);
 phs_grid.y = repmat(phs_grid.y,[1 1 2]);

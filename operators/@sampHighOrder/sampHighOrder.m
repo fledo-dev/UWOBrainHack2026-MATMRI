@@ -51,7 +51,9 @@ classdef sampHighOrder
 %       useInterp=1. Decrease to improve accuracy.
 %   subFact (default = 5): another trade-off for accuracy and speed for 
 %       useInterp=1. Decrease for accuracy. 5 or less should have
-%       negligible error. Min val = 1.
+%       negligible error. Min val = 1. Subsamples along first dim of
+%       sampTimes, so that's the dim where times should monotonically
+%       increase
 %
 %
 %   Within the class, basis functions for each index of phs_spha and
@@ -590,11 +592,12 @@ classdef sampHighOrder
 		
 		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
 			% Create nufft object
-            % TODO: subsampling rates could be automatically determined by
-            % difference between subsampled-then-interpolated and GT
-            % TODO: subsampling should use fourier domain subsampling
-            % followed by zero filling, since these should be close to band
-            % limited (both space and time).
+            % TODO: subsampling in space should use fourier domain subsampling
+            % followed by zero filling. Should probably be paired with a
+            % mask
+            % TODO: could only compute SVD for voxels in the supplied
+            % mask. However, this might cause issues for SMS, since the kz
+            % part probably shouldn't be masked.
 			% TODO: below assumes perfectly axial slices. To do this properly, need to:
 			% 1. have normal vector to slice as an optional input
 			% 2. find linear combination of terms 2:4 in kspha for in-plane to slice
@@ -663,14 +666,8 @@ classdef sampHighOrder
             phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
 			traj = nufftOp(sz_nufft, kloc(:,:)',[],obj.useGPU);
 			clear kloc
-			% Determine full non-linear encoding matrix, subsampling along
-			% time since phase is slowly varying in time. 
-            inds = 1:obj.subFact:numel(obj.sampTimes);
-            if inds(end) ~= numel(obj.sampTimes)
-                % Keep the ends to avoid extrapolation
-                inds = [inds, numel(obj.sampTimes)]';
-            end
-            % We also interp in space via obj.subFactSpc, but this should
+			%%% Determine full non-linear encoding matrix
+            % We interp in space via obj.subFactSpc, but this should
             % be only 1 or 2.
             indsSpc = [];
             if obj.subFactSpc>1
@@ -678,35 +675,61 @@ classdef sampHighOrder
                 % (can even filter to reduce ringing), and then zero-fill
                 % to recover. B0 is pretty slowly varying anyway, and can
                 % allow fractional rates.
-                sz = [obj.imSize,1,1];
-                indsSpc = false(sz);
-                if sz(3) > 1
-                    error('this part untested for 3D')
+                % Subsample on exponential, because it is more similar to
+                % what is zero-filled later. Also allows for weighting the
+                % interpolation via the mask.
+                imb0 = exp(1i*obj.b0); 
+                if ~isempty(obj.b0mask) && numel(obj.b0mask)==numel(obj.b0)
+                    imb0 = imb0.*obj.b0mask;
                 end
-                for n2 = 1:sz(2)
-                    for n3 = 1:sz(3)
-                        strt = mod(n3+mod(n2,obj.subFactSpc), obj.subFactSpc);
-                        if strt==0
-                            strt = obj.subFactSpc;
-                        end
-                        indsSpc(strt:obj.subFactSpc:end,n2,n3) = true;
-                    end
-                end
-                % Keep the ends to avoid extrapolation
-                indsSpc(1,:,:) = true;
-                indsSpc(end,:,:) = true;
-                if sz(2)>1
-                    indsSpc(:,1,:) = true;
-                    indsSpc(:,end,:) = true;
-                end
-                if sz(3)>1
-                    indsSpc(:,:,1) = true;
-                    indsSpc(:,:,end) = true;
-                end
+                error('todo')
+                %
+                % OLD: using inds
+                % sz = [obj.imSize,1,1];
+                % indsSpc = false(sz);
+                % if sz(3) > 1
+                %     error('this part untested for 3D')
+                % end
+                % for n2 = 1:sz(2)
+                %     for n3 = 1:sz(3)
+                %         strt = mod(n3+mod(n2,obj.subFactSpc), obj.subFactSpc);
+                %         if strt==0
+                %             strt = obj.subFactSpc;
+                %         end
+                %         indsSpc(strt:obj.subFactSpc:end,n2,n3) = true;
+                %     end
+                % end
+                % % Keep the ends to avoid extrapolation
+                % indsSpc(1,:,:) = true;
+                % indsSpc(end,:,:) = true;
+                % if sz(2)>1
+                %     indsSpc(:,1,:) = true;
+                %     indsSpc(:,end,:) = true;
+                % end
+                % if sz(3)>1
+                %     indsSpc(:,:,1) = true;
+                %     indsSpc(:,:,end) = true;
+                % end
             end
-			b = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,strtIndSpha:size(obj.phs_spha,1)],[],[],indsSpc,inds);
+            % Subsample in time because it slowly varies
+            [phs_spha_in, phs_conc_in, sampTimes_in, inds] = subSampTime(obj,obj.subFact);
+            if (0)
+                % Find "error" due to undersampling. Maybe not a good
+                % metric, because we're also removing noise...
+                testPos = max(max(cat(3, abs(obj.phs_grid.x(:)), abs(obj.phs_grid.y(:)), abs(obj.phs_grid.z(:)))))/2;
+                x = obj.phs_grid.x; y = obj.phs_grid.y; z = obj.phs_grid.z; b0 = obj.b0;
+                obj.phs_grid.x = testPos; obj.phs_grid.y = testPos; obj.phs_grid.z = testPos; obj.b0 = 0;
+                b_gt = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes,[1,strtIndSpha:size(obj.phs_spha,1)]);
+                phs_spha_test = interp1(inds,gather(permute(phs_spha_in, [2 1 3:10])),1:inds(end),'pchip');
+                phs_conc_test = interp1(inds,gather(permute(phs_conc_in, [2 1 3:10])),1:inds(end),'pchip');
+                b = prepForDirect(obj,phs_spha_test',phs_conc_test',obj.sampTimes,[1,strtIndSpha:size(obj.phs_spha,1)]);
+                err = b_gt - b; err = mean(err.*conj(err));
+            end
+            % Find the full encoding matrix, less the terms included in nufft
+            b = prepForDirect(obj,phs_spha_in,phs_conc_in,sampTimes_in,[1,strtIndSpha:size(obj.phs_spha,1)],[],[],indsSpc);
             b = exp(1i*b);
-            % Find largest singular values and vectors
+            % Find largest singular values and vectors. Should replace
+            % below with svdsketch once it supports GPU.
             S = 1;
             ntry = 0;
             if obj.svdThresh < 0.055
@@ -739,7 +762,9 @@ classdef sampHighOrder
             svdTime = conj(V(:,1:Ns)*S(1:Ns,1:Ns));
             if obj.subFact > 1
                 % Fill back in values if interpolation was used
+                svdTime = reshape(svdTime, [length(inds),obj.kSize(2:end),size(svdTime,2)]);
                 svdTime = interp1(inds,gather(svdTime),1:inds(end),'pchip');
+                svdTime = reshape(svdTime, [prod(obj.kSize), Ns]);
             end
             svdSpace = U(:,1:Ns);
             if obj.subFactSpc > 1
@@ -781,6 +806,31 @@ classdef sampHighOrder
                 erVal = erVal(:) - gather(b(:));
                 erVal = norm(erVal)/norm(b(:))
 			end
+        end
+        
+        function [phs_spha_out, phs_conc_out, sampTimes_in, inds, phs_spha_in, phs_conc_in] = subSampTime(obj,subfact_in)
+            inds = 1:subfact_in:size(obj.sampTimes,1);
+            if inds(end) ~= numel(obj.sampTimes)
+                % Keep the ends to avoid extrapolation
+                inds = [inds, size(obj.sampTimes,1)]';
+            end
+            phs_spha_in = obj.phs_spha;
+            phs_conc_in = obj.phs_conc;
+            sampTimes_in = obj.sampTimes(inds,:);
+            if subfact_in > 1
+                halfsz = ceil(subfact_in/2);
+                win = filtNd(2*(halfsz+1),0.5,1,'gauss');
+                win = win(2:end)/sum(win(2:end));
+                phs_spha_in = convn(phs_spha_in,win(:)','same');
+                phs_conc_in = convn(phs_conc_in,win(:)','same');
+                % Replace points at edges
+                phs_spha_in(:,1:halfsz,:) = obj.phs_spha(:,1:halfsz,:);
+                phs_conc_in(:,1:halfsz,:) = obj.phs_conc(:,1:halfsz,:);
+                phs_spha_in(:,end-halfsz+1:end,:) = obj.phs_spha(:,end-halfsz+1:end,:);
+                phs_conc_in(:,end-halfsz+1:end,:) = obj.phs_conc(:,end-halfsz+1:end,:);
+            end
+            phs_spha_out = phs_spha_in(:,inds,:);
+            phs_conc_out = phs_conc_in(:,inds,:);
         end
 
         function  res = ctranspose(obj)
