@@ -667,49 +667,74 @@ classdef sampHighOrder
 			traj = nufftOp(sz_nufft, kloc(:,:)',[],obj.useGPU);
 			clear kloc
 			%%% Determine full non-linear encoding matrix
-            % We interp in space via obj.subFactSpc, but this should
-            % be only 1 or 2.
-            indsSpc = [];
             if obj.subFactSpc>1
-                % TODO: probably best to subsample B0 map using k-space
-                % (can even filter to reduce ringing), and then zero-fill
-                % to recover. B0 is pretty slowly varying anyway, and can
-                % allow fractional rates.
-                % Subsample on exponential, because it is more similar to
-                % what is zero-filled later. Also allows for weighting the
-                % interpolation via the mask.
-                imb0 = exp(1i*obj.b0); 
-                if ~isempty(obj.b0mask) && numel(obj.b0mask)==numel(obj.b0)
-                    imb0 = imb0.*obj.b0mask;
+                % Subsample in space  Note that fft-based is not
+                % recommended, because it causes ringing due to sharp
+                % transitions at edges of FOV (esp from expanded encoding).
+                % Also, it seems that this causes errors for even tiny
+                % subsampling, so it is currently not recommended.
+                sz = [obj.imSize,1,1];
+                if sz(3) > 1
+                    if sz(3) > obj.num3DSlc
+                        error('this part untested for 3D')
+                    else
+                        Nvox = [2*round(sz(1:2)/sqrt(obj.subFactSpc)/2), sz(3)];
+                    end
+                elseif sz(2) > 1
+                    Nvox = [2*round(sz(1:2)/sqrt(obj.subFactSpc)/2), 1];
+                else
+                    Nvox = [2*round(sz(1)/obj.subFactSpc/2), 1, 1];
                 end
-                error('todo')
-                %
-                % OLD: using inds
-                % sz = [obj.imSize,1,1];
-                % indsSpc = false(sz);
-                % if sz(3) > 1
-                %     error('this part untested for 3D')
-                % end
-                % for n2 = 1:sz(2)
-                %     for n3 = 1:sz(3)
-                %         strt = mod(n3+mod(n2,obj.subFactSpc), obj.subFactSpc);
-                %         if strt==0
-                %             strt = obj.subFactSpc;
-                %         end
-                %         indsSpc(strt:obj.subFactSpc:end,n2,n3) = true;
-                %     end
-                % end
-                % % Keep the ends to avoid extrapolation
-                % indsSpc(1,:,:) = true;
-                % indsSpc(end,:,:) = true;
-                % if sz(2)>1
-                %     indsSpc(:,1,:) = true;
-                %     indsSpc(:,end,:) = true;
-                % end
-                % if sz(3)>1
-                %     indsSpc(:,:,1) = true;
-                %     indsSpc(:,:,end) = true;
-                % end
+                % Interpolate to subsample
+                if obj.NDim == 1
+                    error('1D untested')
+                elseif obj.NDim == 2
+                    [Xold,Yold] = meshgrid(1:obj.imSize(1),1:obj.imSize(2));
+                    [Xnew,Ynew] = meshgrid(linspace(1,obj.imSize(1),Nvox(1)),...
+                        linspace(1,obj.imSize(2),Nvox(2)));
+                    obj.b0 = interp2(obj.b0,Xnew,Ynew);
+                    obj.phs_grid.x = interp2(obj.phs_grid.x,Xnew,Ynew);
+                    obj.phs_grid.y = interp2(obj.phs_grid.y,Xnew,Ynew);
+                    obj.phs_grid.z = interp2(obj.phs_grid.z,Xnew,Ynew);
+                    if ~isempty(obj.b0mask)
+                        obj.b0mask = interp2(double(obj.b0mask),Xnew,Ynew) > 0.5;
+                    end
+                elseif obj.NDim == 3
+                    if obj.imSize > obj.num3DSlc
+                        error('3D untested')
+                        [Xold,Yold,Zold] = meshgrid(1:obj.imSize(1),1:obj.imSize(2),1:obj.imSize(3));
+                        [Xnew,Ynew,Znew] = meshgrid(linspace(1,obj.imSize(1),Nvox(1)),...
+                            linspace(1,obj.imSize(2),Nvox(2)), linspace(1,obj.imSize(3),Nvox(3)));
+                        obj.b0 = interp3(obj.b0,Xnew,Ynew,Znew);
+                        obj.phs_grid.x = interp3(obj.phs_grid.x,Xnew,Ynew,Znew);
+                        obj.phs_grid.y = interp3(obj.phs_grid.y,Xnew,Ynew,Znew);
+                        obj.phs_grid.z = interp3(obj.phs_grid.z,Xnew,Ynew,Znew);
+                        if ~isempty(obj.b0mask)
+                            obj.b0mask = interp3(double(obj.b0mask),Xnew,Ynew,Znew) > 0.5;
+                        end
+                    else
+                        [Xold,Yold] = meshgrid(1:obj.imSize(1),1:obj.imSize(2));
+                        [Xnew,Ynew] = meshgrid(linspace(1,obj.imSize(1),Nvox(1)),...
+                            linspace(1,obj.imSize(2),Nvox(2)));
+                        outvals = zeros([Nvox, 5],'like',obj.b0);
+                        for ns = 1:obj.imSize(3)
+                            outvals(:,:,ns,1) = interp2(obj.b0(:,:,ns),Xnew,Ynew);
+                            outvals(:,:,ns,2) = interp2(obj.phs_grid.x(:,:,ns),Xnew,Ynew);
+                            outvals(:,:,ns,3) = interp2(obj.phs_grid.y(:,:,ns),Xnew,Ynew);
+                            outvals(:,:,ns,4) = interp2(obj.phs_grid.z(:,:,ns),Xnew,Ynew);
+                            if ~isempty(obj.b0mask)
+                                outvals(:,:,ns,5) = interp2(double(obj.b0mask(:,:,ns)),Xnew,Ynew);
+                            end
+                        end
+                        obj.b0 = outvals(:,:,:,1);
+                        obj.phs_grid.x = outvals(:,:,:,2);
+                        obj.phs_grid.y = outvals(:,:,:,3);
+                        obj.phs_grid.z = outvals(:,:,:,4);
+                        if ~isempty(obj.b0mask)
+                            obj.b0mask = outvals(:,:,:,5) > 0.5;
+                        end
+                    end
+                end
             end
             % Subsample in time because it slowly varies
             [phs_spha_in, phs_conc_in, sampTimes_in, inds] = subSampTime(obj,obj.subFact);
@@ -726,7 +751,7 @@ classdef sampHighOrder
                 err = b_gt - b; err = mean(err.*conj(err));
             end
             % Find the full encoding matrix, less the terms included in nufft
-            b = prepForDirect(obj,phs_spha_in,phs_conc_in,sampTimes_in,[1,strtIndSpha:size(obj.phs_spha,1)],[],[],indsSpc);
+            b = prepForDirect(obj,phs_spha_in,phs_conc_in,sampTimes_in,[1,strtIndSpha:size(obj.phs_spha,1)]);
             b = exp(1i*b);
             % Find largest singular values and vectors. Should replace
             % below with svdsketch once it supports GPU.
@@ -768,33 +793,36 @@ classdef sampHighOrder
             end
             svdSpace = U(:,1:Ns);
             if obj.subFactSpc > 1
-                % Fill back in values if interpolation was used in space
-                % This is actually pretty slow, because griddata does not
-                % support GPU.
-                if length(obj.imSize) == 1
-                    warning('1D untested')
-                    indsSpc = find(indsSpc);
-                    svdSpace = interp1(indsSpc,gather(svdSpace),1:indsSpc(end),'pchip');
-                elseif length(obj.imSize) == 2
-                    [X,Y] = ndgrid(1:obj.imSize(1),1:obj.imSize(2));
-                    svdSpaceOut = zeros(prod(obj.imSize),size(svdSpace,2));
-                    for n=1:size(svdSpace,2)
-                        tmp = griddata(X(indsSpc),Y(indsSpc),gather(svdSpace(:,n)),X(:),Y(:),'natural');
-                        svdSpaceOut(:,n) = tmp(:);
+                % Fill back in values if interpolation was used in space.
+                % Note that fft zero filling is not recommended, because it
+                % causes ringing due to sharp transitions at edges of FOV
+                % (from expanded encoding). Phase wraps can cause issues,
+                % so we do mag and phase separately.
+                svdSpace = reshape(svdSpace, [Nvox(1:obj.NDim), Ns]);
+                svdSpaceOut = zeros([obj.imSize, Ns],'like',svdSpace);
+                if obj.NDim == 1
+                    error('1D untested')
+                elseif obj.NDim == 2
+                    for n=1:Ns
+                        mag = interp2(Xnew,Ynew,abs(svdSpace(:,:,n)),Xold,Yold);
+                        compl = interp2(Xnew,Ynew,svdSpace(:,:,n),Xold,Yold);
+                        svdSpaceOut(:,:,n) = mag.*exp(1i*angle(compl));
                     end
-                    svdSpace = svdSpaceOut;
-                    clear X Y svdSpaceOut
-                elseif length(obj.imSize) == 3
-                    warning('3D untested')
-                    [X,Y,Z] = ndgrid(1:obj.imSize(1),1:obj.imSize(2),1:obj.imSize(3));
-                    svdSpaceOut = zeros(prod(obj.imSize),size(svdSpace,2));
-                    for n=1:size(svdSpace,2)
-                        tmp = griddata(X(indsSpc),Y(indsSpc),Z(indsSpc),gather(svdSpace(:,n)),X(:),Y(:),Z(:),'natural');
-                        svdSpaceOut(:,n) = tmp(:);
+                elseif obj.NDim == 3
+                    if obj.imSize > obj.num3DSlc
+                        error('3D untested')
+                    else
+                        for n=1:Ns
+                            for ns = 1:obj.imSize(3)
+                                mag = interp2(Xnew,Ynew,abs(svdSpace(:,:,ns,n)),Xold,Yold);
+                                compl = interp2(Xnew,Ynew,svdSpace(:,:,ns,n),Xold,Yold);
+                                svdSpaceOut(:,:,ns,n) = mag.*exp(1i*angle(compl));
+                            end
+                        end
                     end
-                    svdSpace = svdSpaceOut;
-                    clear X Y svdSpaceOut
                 end
+                svdSpace = reshape(svdSpaceOut, [], Ns);
+                clear svdSpaceOut mag compl
             end
             clear U V
 			% Compute error wrt direct approach

@@ -168,6 +168,18 @@ d2 = dot(Sx_b(:),yvec(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-5, 'Interp adjoint test failed.')
 assert(isa(Sx_b, 'single'), 'Interp single precision failed.')
 
+% Test space subsampling. Reduce phase errors because this can have
+% problems where there are phase wraps close together.
+phs_spha_b = phs_spha;
+phs_spha_b([1,5:end],:) = phs_spha_b([1,5:end],:)/5;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,0);
+Sx = S*xvec;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,0.01,[1 2]);
+Sx_b = S*xvec;
+cost = Sx(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp comparison to direct failed with subsampling in space.')
+
 % Test interp with SMS-like acquisition (3D input, but too small to do
 % nufft on 3rd dim)
 subFactTime = 2; % z-encoding for SMS can make aggressive subsampling introduce errors, so decrease it here. Note that 5 is likely still okay for real data - this sim has rapid variation
@@ -185,13 +197,25 @@ Sx_b = S*xvec;
 cost = Sx(:)-Sx_b(:);
 cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
 assert(cost < 1e-4, 'Interp comparison to direct for SMS failed.')
-xvec = repmat(xvec, [1 1 1 2]); % Include repetitions
+% Subsampling in space
+phs_spha_b = phs_spha;
+phs_spha_b([1,5:end],:) = phs_spha_b([1,5:end],:)/5;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,0);
+Sx = S*xvec;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,0.01,[1 2]);
+Sx_b = S*xvec;
+cost = Sx(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp comparison to direct failed with subsampling in space for SMS.')
+% Test adjoint. Include repetitions
+xvec = repmat(xvec, [1 1 1 2]); 
 Sx_b = S*xvec;
 yvec = randn(size(Sx_b));
 Sy_b = S'*yvec;
 d1 = dot(xvec(:),Sy_b(:));
 d2 = dot(Sx_b(:),yvec(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Interp adjoint test failed.')
+
 
 
 %% Check adjoint for larger im dims
