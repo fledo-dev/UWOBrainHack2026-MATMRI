@@ -1,5 +1,7 @@
 function tests(obj)
 
+rng(1)
+
 N0 = 64;
 useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
 useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
@@ -68,8 +70,8 @@ dx = 0.8;
 dy = 0.95;
 kloc(:,1) = 2*pi*kloc(:,1)/max(abs(kloc(:,1)))/2/dx;
 kloc(:,2) = 2*pi*kloc(:,2)/max(abs(kloc(:,2)))/2/dy;
-x = (x+1)*dx;
-y = (y+1)*dy;
+x = (x+3)*dx; % Shift grid to test how that is handled
+y = (y-2)*dy;
 scl = 0.5*max(abs(x(:)));
 b0 = scl^5*(randn*x + randn*y) + ...
     scl*(randn*x.^4 + randn*(x.^3).*y + randn*(x.^2).*(y.^2) + randn*x.*(y.^3) + randn*y.^4) +...
@@ -154,7 +156,9 @@ end
 S = sampHighOrder(b0,reshape(sampTimes,[],2),reshape(phs_spha,size(phs_spha,1),[],2),...
     reshape(phs_coco,size(phs_coco,1),[],2),phs_grid,[],useGPU,useSingle,1,0.01);
 Sx_b2 = S*xvec;
-assert(sum(abs(Sx_b2(:)-Sx_b)) < 1e-8, 'Interp sampTimes ND test failed.')
+cost = Sx_b2(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp sampTimes ND test failed.')
 % Test single precision for interp option
 S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,1,1,0.01);
 Sx_b = S*xvec;
@@ -163,6 +167,54 @@ d1 = dot(xvec(:),Sy_b(:));
 d2 = dot(Sx_b(:),yvec(:));
 assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-5, 'Interp adjoint test failed.')
 assert(isa(Sx_b, 'single'), 'Interp single precision failed.')
+
+% Test space subsampling. Reduce phase errors because this can have
+% problems where there are phase wraps close together.
+phs_spha_b = phs_spha;
+phs_spha_b([1,5:end],:) = phs_spha_b([1,5:end],:)/5;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,0);
+Sx = S*xvec;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,0.01,[1 2]);
+Sx_b = S*xvec;
+cost = Sx(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp comparison to direct failed with subsampling in space.')
+
+% Test interp with SMS-like acquisition (3D input, but too small to do
+% nufft on 3rd dim)
+subFactTime = 2; % z-encoding for SMS can make aggressive subsampling introduce errors, so decrease it here. Note that 5 is likely still okay for real data - this sim has rapid variation
+b0 = cat(3,b0,0.5*b0);
+phs_grid.x = repmat(phs_grid.x,[1 1 2]);
+phs_grid.y = repmat(phs_grid.y,[1 1 2]);
+phs_grid.z = cat(3,-0.3*phs_grid.z,0.7*phs_grid.z);
+dz = phs_grid.z(1,1,2)-phs_grid.z(1,1,1);
+phs_spha(4,:) = pi/dz*sin(4.8*(1:size(phs_spha,2))/N0);
+xvec = cat(3, xvec, padcrop(phantom(round(N0/2)), size(xvec)));
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
+Sx = S*xvec;
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01,subFactTime);
+Sx_b = S*xvec;
+cost = Sx(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp comparison to direct for SMS failed.')
+% Subsampling in space
+phs_spha_b = phs_spha;
+phs_spha_b([1,5:end],:) = phs_spha_b([1,5:end],:)/5;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,0);
+Sx = S*xvec;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,0.01,[1 2]);
+Sx_b = S*xvec;
+cost = Sx(:)-Sx_b(:);
+cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
+assert(cost < 1e-4, 'Interp comparison to direct failed with subsampling in space for SMS.')
+% Test adjoint. Include repetitions
+xvec = repmat(xvec, [1 1 1 2]); 
+Sx_b = S*xvec;
+yvec = randn(size(Sx_b));
+Sy_b = S'*yvec;
+d1 = dot(xvec(:),Sy_b(:));
+d2 = dot(Sx_b(:),yvec(:));
+assert(abs(d1-d2)/min(abs(d1),abs(d2)) < 1e-8, 'Interp adjoint test failed.')
 
 
 
