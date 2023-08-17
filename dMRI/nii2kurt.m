@@ -272,7 +272,7 @@ for nf = 2:length(fshells)
     A = cat(1,A,Ab0);
 end
 % Get initial guess
-y = AsubAllf(S,'pinv',A,szIm(1:3),freqs,fshells,opt.fthresh,bval,opt.bthresh,mask); 
+y = AsubAllf(S,'pinv',A,szIm(1:3),freqs,fshells,opt.fthresh,mask); 
 if opt.tvReg > 0
     gamRel = [0 1 1 1 1 1]'; % [s0 Dperp Dpar Wperp Wpar Wmean]
     NitMax = 500;
@@ -288,12 +288,12 @@ if opt.tvReg > 0
         Rin = @(x,transp) spDiff(x,transp,[0 0 1 1 1]);
     end
     x0diff = sqrt(gamRel).*spDiff(y,'notransp',[0 0 1 1 1]);
-    resid = AsubAllf(y,'notransp',A,szIm(1:3),freqs,fshells,opt.fthresh,bval,opt.bthresh,mask) - bin(:,:,:);
+    resid = AsubAllf(y,'notransp',A,szIm(1:3),freqs,fshells,opt.fthresh,mask) - bin(:,:,:);
     norm2diff  = sum(x0diff(:).^2);
     norm2resid = sum(resid(:).^2);
     clear x0diff resid
     gam = opt.tvReg*gamRel*norm2resid/norm2diff;
-    [y, resSqAll2, ~,~,~,~,status2] = cgne(@(x,transp) AsubAllf(x,transp,A,szIm(1:3),freqs,fshells,opt.fthresh,bval,opt.bthresh,mask),...
+    [y, resSqAll2, ~,~,~,~,status2] = cgne(@(x,transp) AsubAllf(x,transp,A,szIm(1:3),freqs,fshells,opt.fthresh,mask),...
         bin,y,NitMax,opt,gam,Rin);
 end
 clear bin S A* 
@@ -415,7 +415,7 @@ else
 end
 end
 
-function y = AsubAllf(x,transp,A,szin,freqs,fshells,fthresh,bvals,bthresh,mask)
+function y = AsubAllf(x,transp,A,szin,freqs,fshells,fthresh,mask)
 if strcmp(transp,'notransp')
     y = zeros([size(A,1) 1 prod(szin)],'like',A);
 else
@@ -424,7 +424,6 @@ end
 szy = size(y);
 for nf = 1:length(fshells)
     inds_f = abs(freqs-fshells(nf))<fthresh ;
-    %inds_f = or(inds_f, bvals<bthresh) ; % include all b0
     if strcmp(transp,'notransp')
         if isgpuarray(A)
             y(inds_f,:,mask) = pagefun(@mtimes, A(inds_f,:,mask), x(:,nf,mask));
