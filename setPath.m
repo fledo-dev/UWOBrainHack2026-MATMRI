@@ -24,9 +24,10 @@ function setPath
   addpath([topPath, 'simulation']);
   addpath([topPath, 'trajectory']);
   addpath([topPath, 'unitTests']);
+  addpath([topPath, 'dMRI']);
 
   
    % Set matMRI version
   global matMRIVersion
-  matMRIVersion = 1.07;
+  matMRIVersion = 1.09;
 end
