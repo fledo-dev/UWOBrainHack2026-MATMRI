@@ -153,9 +153,13 @@ if opt.tvFreq > 0
     warning('Using OGSE freq regularization - not well tested and not recommended.')
 end
 
-% Expand mask to include voxels that are 0 in all acquisitions (can happen
+% Crop mask to exclude voxels that are 0 in all acquisitions (can happen
 % from eddy current correction)
-mask = and(mask, sum(im,4) > 2*eps);
+mask = and(mask, sum(abs(im),4) > 2*eps);
+
+% Pixel values of 0 can lead to NaN that propagate throughout the image due
+% to the spatial regularization.
+im(im==0) = eps;
 
 % Move to GPU
 if ~opt.noGPU
