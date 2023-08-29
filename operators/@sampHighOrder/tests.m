@@ -5,6 +5,7 @@ rng(1)
 N0 = 64;
 useGPU = 1;    % Code implementation does not change with useGPU, so results should not depend on this (just speed)
 useSingle = 0; % This is important for unit tests because it affects assert thresholds. There is a specific test for single precision below.
+opt.segmentedNdiv = 2; % make sure there are segments for these tests.
 
 %% Check adjoint for basic case for 1D through 3D
 for nd = 1:3
@@ -28,12 +29,12 @@ for nd = 1:3
 
     % Confirm that segmented approach is equivalent
     clear S
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,2,opt);
     Sx2 = S*x;
     Sy2 = S'*y;
     assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Segmented test failed.')
     clear S
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,3,opt);
     Sx2 = S*x;
     Sy2 = S'*y;
     assert(norm(Sx(:)-Sx2(:)) + norm(Sy(:)-Sy2(:)) < 1e-8, 'Noprecomp test failed.')
@@ -46,16 +47,16 @@ for nd = 1:3
     sz_zc = size(phs_coco);
     sz_zc(2) = 1;
     dphs_coco = diff(cat(2,zeros(sz_zc, 'like', phs_coco),phs_coco),1,2);
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],0);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
     S = S.setPhiDiv(dphs_spha,dphs_coco);
     Sx2_0 = S*x;
     clear S
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],1);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,2,opt);
     S = S.setPhiDiv(dphs_spha,dphs_coco);
     Sx2_1 = S*x;
     assert(norm(Sx2_0(:)-Sx2_1(:)) < 1e-8, 'Phidiv test failed, seg1.')
     clear S
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0,[],[],2);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,3,opt);
     S = S.setPhiDiv(dphs_spha,dphs_coco);
     Sx2_2 = S*x;
     assert(norm(Sx2_0(:)-Sx2_2(:)) < 1e-8, 'Phidiv test failed, seg2.')
@@ -63,6 +64,10 @@ for nd = 1:3
 end
 
 %% Test interpolation. Use random polynomials to simulate slow variations
+opt.svdThresh = 0.01;
+opt.subFact = 5;
+opt.subFactSpc = 1;
+opt.loopDim = 5;
 kloc = projection(N0,N0-4,2);
 sampTimes = (1:size(kloc,1))';
 [x,y] = meshgrid(-N0/2:N0/2-1,-N0/2:N0/2-1);
@@ -132,7 +137,7 @@ for orient=1:4
         Sx_phidiv = S*xvec;
     end
     %
-    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01);
+    S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,opt);
     Sx_b = S*xvec;
     Sy_b = S'*yvec(:);
     d1 = dot(xvec(:),Sy_b(:));
@@ -154,13 +159,13 @@ for orient=1:4
 end
 % Test non-1D sampTimes for interp option
 S = sampHighOrder(b0,reshape(sampTimes,[],2),reshape(phs_spha,size(phs_spha,1),[],2),...
-    reshape(phs_coco,size(phs_coco,1),[],2),phs_grid,[],useGPU,useSingle,1,0.01);
+    reshape(phs_coco,size(phs_coco,1),[],2),phs_grid,[],useGPU,useSingle,1,opt);
 Sx_b2 = S*xvec;
 cost = Sx_b2(:)-Sx_b(:);
 cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
 assert(cost < 1e-4, 'Interp sampTimes ND test failed.')
 % Test single precision for interp option
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,1,1,0.01);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,1,1,opt);
 Sx_b = S*xvec;
 Sy_b = S'*yvec(:);
 d1 = dot(xvec(:),Sy_b(:));
@@ -174,7 +179,11 @@ phs_spha_b = phs_spha;
 phs_spha_b([1,5:end],:) = phs_spha_b([1,5:end],:)/5;
 S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,0);
 Sx = S*xvec;
-S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,0.01,[1 2]);
+opt.subFact = 1;
+opt.subFactSpc = 2;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,opt);
+opt.subFact = 5;
+opt.subFactSpc = 1;
 Sx_b = S*xvec;
 cost = Sx(:)-Sx_b(:);
 cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
@@ -182,7 +191,7 @@ assert(cost < 1e-4, 'Interp comparison to direct failed with subsampling in spac
 
 % Test interp with SMS-like acquisition (3D input, but too small to do
 % nufft on 3rd dim)
-subFactTime = 2; % z-encoding for SMS can make aggressive subsampling introduce errors, so decrease it here. Note that 5 is likely still okay for real data - this sim has rapid variation
+opt.subFact = 2; % z-encoding for SMS can make aggressive subsampling introduce errors, so decrease it here. Note that 5 is likely still okay for real data - this sim has rapid variation
 b0 = cat(3,b0,0.5*b0);
 phs_grid.x = repmat(phs_grid.x,[1 1 2]);
 phs_grid.y = repmat(phs_grid.y,[1 1 2]);
@@ -192,7 +201,7 @@ phs_spha(4,:) = pi/dz*sin(4.8*(1:size(phs_spha,2))/N0);
 xvec = cat(3, xvec, padcrop(phantom(round(N0/2)), size(xvec)));
 S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
 Sx = S*xvec;
-S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,0.01,subFactTime);
+S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,1,opt);
 Sx_b = S*xvec;
 cost = Sx(:)-Sx_b(:);
 cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
@@ -202,7 +211,11 @@ phs_spha_b = phs_spha;
 phs_spha_b([1,5:end],:) = phs_spha_b([1,5:end],:)/5;
 S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,0);
 Sx = S*xvec;
-S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,0.01,[1 2]);
+opt.subFact = 1;
+opt.subFactSpc = 2;
+S = sampHighOrder(b0/5,sampTimes,phs_spha_b,phs_coco/5,phs_grid,[],useGPU,useSingle,1,opt);
+opt.subFact = 5;
+opt.subFactSpc = 1;
 Sx_b = S*xvec;
 cost = Sx(:)-Sx_b(:);
 cost = sqrt(sum(cost.*conj(cost)))/numel(cost);

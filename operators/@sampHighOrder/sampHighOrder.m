@@ -6,7 +6,7 @@ classdef sampHighOrder
 %
 % Usage: 
 %   Define sampHighOrder object using 
-%       S = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,imMask,useGPU,useSingle,useInterp,svdThresh,subFact)
+%       S = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,imMask,useGPU,useSingle,approach,opt)
 %   Sample image using data = S*image. x can have more dimensions than
 %       b0, but summations are only performed over first two dims (i.e., 2D
 %       imaging is assumed). Fairly high memory overhead due to 
@@ -37,41 +37,61 @@ classdef sampHighOrder
 %           phs_grid.z: value of z at each position in units of m. 
 %   imMask: mask denoted expected location of signal. b0map and 2nd
 %       order+ spherical harmonic phase terms are set to 0 outside the
-%       mask. This improves the performance of interpolation (useInterp
-%       option), because it removes regions with quickly varying phase that
-%       are irrevelant to image recon (since there's no signal there).
+%       mask. This can improve the performance of interpolation
+%       (approach=1), because it removes regions with quickly varying phase
+%       that are irrevelant to image recon (since there's no signal there).
 %   useGPU: whether to use GPU. Default = true.
 %   useSingle: if true, use single instead of double precision. Default =
 %       false. 
-%   useInterp: uses an interpolated approach. Always faster than direct
-%       approach on CPU (i.e., when useGPU = 1). Not much benefit for GPU,
-%       unless not enough memory for direct approach. 
-%		See Wilm et al DOI: 10.1109/TMI.2012.2190991
-%   svdThresh (default = 0.05): trades off accuracy with speed when
-%       useInterp=1. Decrease to improve accuracy.
-%   subFact (default = 5): another trade-off for accuracy and speed for 
-%       useInterp=1. Decrease for accuracy. 5 or less should have
-%       negligible error. Min val = 1. Subsamples along first dim of
-%       sampTimes, so that's the dim where times should monotonically
-%       increase
-%
+%   approach:
+%       0 (default): use brute force full matrix multiplication (i.e.,
+%         "direct" approach). Perfect accuracy and fast, but very large
+%         memory requirements.
+%       1: uses an interpolated approach. Much faster than direct
+%         approach on CPU (i.e., when useGPU = 0), but can be less accurate
+%         (see options below that trade-off accuracy with speed). Large
+%         benefit for GPU versus segmented direct. Decent benefit vs direct
+%         approach without segmenting.
+%		  See Wilm et al DOI: 10.1109/TMI.2012.2190991
+%       2: use segmented direct approach but still precompute array and
+%         save in RAM. Perfect accuracy, medium speed, low GPU mem
+%         requirements.
+%       3: use segmented direct approach with no precomputation. Almost no
+%         memory needed, but very slow.
+%   opt: structure with options. See below
+%       svdThresh (default = 0.05): trades off accuracy with 
+%           speed when approach=1. Decrease to improve accuracy.
+%       subFact (default = 5): another trade-off for accuracy and speed for 
+%           approach=1. Decrease for accuracy. 5 or less should have
+%           negligible error. even 20 seems okay most of the time. Min val = 1. 
+%           Subsamples along first dim of sampTimes, so that's the dim where
+%           times should monotonically increase
+%       subFactSpc (default = 1): subsample in space for apprach=1. Not recommended.
+%       loopDim (default = 5): number of dimensions to simultaneously
+%           perform nufft over for approach=1. No effect on accuracy. May need to be 
+%           reduced if GPU memory is low or matrix size is large.
+%       segmentedNdiv (default = automatic based on available memory):
+%           number of segments for segmented approach (i.e., approach == 2 || approach == 3).
+%           
 %
 %   Within the class, basis functions for each index of phs_spha and
 %   phs_conc are computed using basisFuncHarm.m and basisFuncConc.m,
 %   respectively. 
 %
-%   (c) Corey Baron 2020
+%   (c) Corey Baron 2020-23
 
 	properties
         useSingle = 0;
 		useGPU = 1;
-		useInterp = 0; 
-        useSegmented = 0;    % Whether to use segmented encoding matrix. May be necessary for large data size
-                          %   1: use segmented, but still precompute array and save in RAM
-                          %   2: use segmented with no precomputation at all. Slowest option, but least memory.
+        approach = 0;     % 0: direct. 1: interpolated. 2: segmented with precompute. 3. segmented w/o precompute.
         svdThresh = 0.05; % Threshold for svd used in interpolated method
         subFact = 5;      % Factor to subsample in time by for interpolated approach
         subFactSpc = 1;   % Factor to subsample in space by for interpolated approach
+        loopDim = 5;      % Number of dimensions to simultaneously do nufft over for interpolated. 
+                            % default is 5 b/c 3D + rcvrs + svd reps. High
+                            % end GPU should have enough memory for slices
+                            % or SMS, but full 3D may require reduction.
+        segmentedNdiv = []; % number of segments for segmented approach. 
         num3DSlc = 32;  % Number of slices required to do interpolation on 3rd dim (only for interpolated approach)
 	end
 
@@ -94,7 +114,7 @@ classdef sampHighOrder
 		kSize = [];
 		imSize = [];
         trajFromRaw = [];
-        useSegmentedNdiv = [];
+        
         ksphaDiv = [];
         kconcDiv = [];
         SegNpnts = [];     % Seg* variables are for segmented encoding matrix with precomputation
@@ -104,7 +124,7 @@ classdef sampHighOrder
 
 	methods
 
-		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,useInterp,svdThresh,subFacts,useSegmented)
+		function obj = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid,b0mask,useGPU,useSingle,approach,opt)
 			if nargin == 0
 				obj.tests;
 				return;
@@ -112,76 +132,84 @@ classdef sampHighOrder
             if nargin>5
 				obj.b0mask = b0mask;
             end
-            if nargin<6 || isempty(useGPU)
-                % Determine options based on memory available
-                % Precomputations using GPU requires about 3.3 times numel(b0)*numel(sampTimes)*8 bytes of memory 
-                % After this calc, sampHighOrder object requires numel(b0)*numel(sampTimes)*8 bytes
-                % If the calc is successful, there is enough working memory to run
-                % multiplications with sampHighOrder object.
-                % To be safe, we allow for 4 times numel(b0)*numel(sampTimes)*8
-                if ~(gpuDeviceCount>0)
-                    obj.useGPU = 0;
-                    obj.useInterp = 1;
-                else
-                    G = gpuDevice;
-                    avMem = G.AvailableMemory;
-                    numbytes = numel(phs_grid.x)*numel(sampTimes)*8;
-                    if numbytes < 0.2*avMem
-                        obj.useGPU = 1;
-                        obj.useSingle = 0;
-                        obj.useInterp = 0;
-                    elseif numbytes < 0.4*avMem
-                        obj.useGPU = 1;
-                        obj.useSingle = 1;
-                        obj.useInterp = 0;
-                    else
-                        obj.useGPU = 1;
-                        obj.useSingle = 1;
-                        obj.useInterp = 0;
-                        obj.useSegmented = 1;
-                        obj.useSegmentedNdiv = ceil(numbytes / (0.2*avMem)); % 0.2 factor was determine heuristically
-                        if obj.useSegmentedNdiv > max(numel(b0),numel(sampTimes))/4
-                            % Unlikely, but possible. Still use single,
-                            % because matrix size must be massive.
-                            obj.useGPU = 0;
-                            obj.useSingle = 1;
-                            obj.useInterp = 1;
-                            obj.useSegmented = 0;
-                        end
+            if nargin>6 && ~isempty(useGPU)
+                obj.useGPU = useGPU;
+            end
+            if nargin>7 && ~isempty(useSingle)
+                obj.useSingle = useSingle;
+            end
+            if nargin>8 && ~isempty(approach)
+                obj.approach = approach;
+            end
+            if nargin>9 && ~isempty(opt) 
+                if isfield(opt,'svdThresh') && ~isempty(opt.svdThresh)
+                    obj.svdThresh = opt.svdThresh;
+                end
+                if isfield(opt,'subFact') && ~isempty(opt.subFact)
+                    obj.subFact = opt.subFact;
+                end
+                if isfield(opt,'subFactSpc') && ~isempty(opt.subFactSpc)
+                    obj.subFactSpc = opt.subFactSpc;
+                end
+                if isfield(opt,'loopDim') && ~isempty(opt.loopDim)
+                    obj.loopDim = opt.loopDim;
+                end
+                if isfield(opt,'segmentedNdiv') && ~isempty(opt.segmentedNdiv)
+                    obj.segmentedNdiv = opt.segmentedNdiv;
+                end
+            end
+            % Check inputs.
+            if ~(gpuDeviceCount>0)
+                obj.useGPU = 0;
+                if obj.approach ~= 1
+                    warning('No GPU detected. Interpolated approach recommended.')
+                end
+            end
+            if (obj.approach == 0) && (obj.useGPU)
+                % Revert to segmented if not enough memory for direct.
+                G = gpuDevice;
+                avMem = G.AvailableMemory;
+                numbytes = numel(phs_grid.x)*numel(sampTimes)*8;
+                if obj.useSingle
+                    numbytes = 0.5*numbytes;
+                end
+                if numbytes > 0.2*avMem % 0.2 factor was determine heuristically
+                    [~,warnID] = lastwarn;
+                    if ~strcmp(warnID, 'sampHighOrder:mem0')
+                        % sampHighOrder is often run in a loop, so we avoid
+                        % warning spam.
+                        warning('sampHighOrder:mem0','Not enough memory for direct approach - switching to segmented. Interpolated approach likely faster (approach=1)')
                     end
-                end
-            else
-                if nargin>6 && ~isempty(useGPU)
-                    obj.useGPU = useGPU;
-                end
-                if nargin>7 && ~isempty(useSingle)
-                    obj.useSingle = useSingle;
-                end
-                if nargin>8 && ~isempty(useInterp)
-                    obj.useInterp = useInterp;
-                end
-                if nargin>9 && ~isempty(svdThresh)
-                    obj.svdThresh = svdThresh;
-                end
-                if nargin>10 && ~isempty(subFacts)
-                    obj.subFact = subFacts(1);
-                    if numel(subFacts)>1
-                        obj.subFactSpc = subFacts(2);
+                    obj.approach = 2;
+                    obj.segmentedNdiv = ceil(numbytes / (0.2*avMem)); 
+                    if obj.segmentedNdiv > max(numel(b0),numel(sampTimes))/10
+                        error('Insufficient GPU memory available. Can set useGPU to 0. approach=1 recommended.')
                     end
-                end
-                if nargin>11 && ~isempty(useSegmented)
-                    obj.useSegmented = useSegmented;
-                    obj.useSegmentedNdiv = 2;
                 end
             end
             if obj.subFact < 1
                 obj.subFact = 1;
             end
-            % Check for GPU support
-            if ~(gpuDeviceCount>0) && obj.useGPU
-                warning('No GPU detected or GPU not supported. Using CPU.')
-                obj.useGPU = 0;
-            end  
+            if obj.subFactSpc < 1
+                obj.subFactSpc = 1;
+            end
+            if isempty(obj.segmentedNdiv) && (obj.approach > 1)
+                if ~(gpuDeviceCount>0) 
+                    fprintf('sampHighOrder: trying 5 segments. If out of memory set opt.segmentedNdiv to a higher number.\n')
+                    obj.segmentedNdiv = 5;
+                else
+                    G = gpuDevice;
+                    avMem = G.AvailableMemory;
+                    numbytes = numel(phs_grid.x)*numel(sampTimes)*8;
+                    if obj.useSingle
+                        numbytes = 0.5*numbytes;
+                    end
+                    obj.segmentedNdiv = ceil(numbytes / (0.2*avMem)); % 0.2 factor was determine heuristically
+                    if obj.segmentedNdiv > max(numel(b0),numel(sampTimes))/10
+                        error('Insufficient GPU memory available. approach=1 recommended.')
+                    end
+                end
+            end
             obj.phs_grid = phs_grid;
 			obj.imSize = size(phs_grid.x);  
             if isempty(b0)
@@ -236,23 +264,24 @@ classdef sampHighOrder
 				obj.phs_grid.y = gpuArray(obj.phs_grid.y);
 				obj.phs_grid.z = gpuArray(obj.phs_grid.z);
                 obj.b0mask = gpuArray(obj.b0mask);
-			end
-			if obj.useInterp
-                [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft] = prepForInterp(obj);
-                if obj.useGPU
-                    obj.svdTime = gpuArray(obj.svdTime);
-                    obj.svdSpace = gpuArray(obj.svdSpace);
-                    obj.phsShft = gpuArray(obj.phsShft);
-                end
-            elseif ~obj.useSegmented
-				obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
-            elseif obj.useSegmented 
-                obj.SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
-                obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
-                if obj.useSegmented == 1
-                    obj.SegPhs = prepForSegmented(obj);
-                end
-			end
+            end
+            switch obj.approach
+                case 0
+                    obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
+                case 1
+                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft] = prepForInterp(obj);
+                    if obj.useGPU
+                        obj.svdTime = gpuArray(obj.svdTime);
+                        obj.svdSpace = gpuArray(obj.svdSpace);
+                        obj.phsShft = gpuArray(obj.phsShft);
+                    end
+                case {2,3}
+                    obj.SegNpnts = ceil(prod(obj.imSize)/obj.segmentedNdiv);
+                    obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.segmentedNdiv);
+                    if obj.approach == 2
+                        obj.SegPhs = prepForSegmented(obj);
+                    end
+            end
 		end
 
 		function y = mtimes(obj,x)			
@@ -265,13 +294,14 @@ classdef sampHighOrder
 
             % Choose method (all should give the same result, but with
             % different trade-offs in terms of speed, memory usage, and
-            % accuracy (only obj.useInterp can reduce accuracy)
-            if obj.useInterp
-                y = useInterpWorker(obj,x);
-            elseif obj.useSegmented
-                y = useSegmentedWorker(obj,x);
-            else
-                y = useDirectWorker(obj,x);
+            % accuracy (only useInterpWorker can reduce accuracy)
+            switch obj.approach
+                case 0
+                    y = useDirectWorker(obj,x);
+                case 1
+                    y = useInterpWorker(obj,x);
+                case {2,3}
+                    y = useSegmentedWorker(obj,x);
             end
         end
 		
@@ -367,11 +397,11 @@ classdef sampHighOrder
             else
                 x_a = reshape(x_a, prod(obj.imSize), []);
             end   
-            for nc = 1:obj.useSegmentedNdiv
+            for nc = 1:obj.segmentedNdiv
                 if obj.adjoint
                     subinds1 = 1 + (nc-1)*obj.SegNpntsAdj;
                     subinds2 = min(obj.SegNpntsAdj + (nc-1)*obj.SegNpntsAdj, prod(obj.kSize));
-                    if obj.useSegmented > 1
+                    if obj.approach == 3
                         phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
                             obj.sampTimes,[],[],[subinds1,subinds2]);
                     else
@@ -387,7 +417,7 @@ classdef sampHighOrder
                 else
                     subinds1 = 1 + (nc-1)*obj.SegNpnts;
                     subinds2 = min(obj.SegNpnts + (nc-1)*obj.SegNpnts, prod(obj.imSize));
-                    if obj.useSegmented > 1
+                    if obj.approach == 3
                         phs = prepForDirect(obj,obj.phs_spha,obj.phs_conc,...
                             obj.sampTimes,[],[subinds1,subinds2],[]);
                     else
@@ -420,8 +450,8 @@ classdef sampHighOrder
         function SegPhs = prepForSegmented(obj)
             try
                 % Precompute segmented encoding matrix
-                SegPhs = cell(obj.useSegmentedNdiv, 2);
-                for nc = 1:obj.useSegmentedNdiv
+                SegPhs = cell(obj.segmentedNdiv, 2);
+                for nc = 1:obj.segmentedNdiv
                     for nm = 1:2
                         if nm==2
                             Npnts = obj.SegNpntsAdj;
@@ -446,7 +476,7 @@ classdef sampHighOrder
                 end
             catch ME
                 if contains(ME.message, 'memory') || strcmp(ME.identifier, 'MATLAB:array:SizeLimitExceeded')
-                    msg = 'Set sampHighOrder option useSegmented = 2 if out of memory';
+                    msg = 'Set sampHighOrder option approach = 3 if out of memory';
                     causeException = MException('MATLAB:sampHighOrder:memory',msg);
                     ME = addCause(ME,causeException);
                 end
@@ -549,29 +579,21 @@ classdef sampHighOrder
 		end
 
         function obj = setPhiDiv(obj,ksphaDiv,kconcDiv)
-            if (obj.useSegmented ~= 2) || ~obj.useInterp
+            if (obj.approach == 0) && (obj.useGPU) 
                 % Check memory again, since PhiDiv greatly increases memory
-                % demand.
+                % demand during execution.
                 G = gpuDevice;
                 avMem = G.AvailableMemory;
                 numbytes = numel(obj.b0)*numel(obj.sampTimes)*8;
-                if numbytes < 0.15*avMem
-                    obj.useGPU = 1;
-                    obj.useSingle = 0;
-                    obj.useInterp = 0;
-                elseif numbytes < 0.3*avMem
-                    obj.useGPU = 1;
-                    obj.useSingle = 1;
-                    obj.useInterp = 0;
-                else
-                    obj.useGPU = 1;
-                    obj.useSingle = 1;
-                    obj.useInterp = 0;
-                    obj.useSegmented = 1;
-                    obj.useSegmentedNdiv = ceil(numbytes / (0.1*avMem));
+                if obj.useSingle
+                    numbytes = 0.5*numbytes;
+                end
+                if numbytes > 0.15*avMem
+                    obj.approach = 2;
+                    obj.segmentedNdiv = ceil(numbytes / (0.1*avMem));
                     obj.kbase = [];
-                    obj.SegNpnts = ceil(prod(obj.imSize)/obj.useSegmentedNdiv);
-                    obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.useSegmentedNdiv);
+                    obj.SegNpnts = ceil(prod(obj.imSize)/obj.segmentedNdiv);
+                    obj.SegNpntsAdj = ceil(prod(obj.kSize)/obj.segmentedNdiv);
                     obj.SegPhs = prepForSegmented(obj);
                 end
             end
@@ -665,6 +687,7 @@ classdef sampHighOrder
             % Create nufft object
             phsShft = reshape(exp(1i*phsShft), size(obj.sampTimes));
 			traj = nufftOp(sz_nufft, kloc(:,:)',[],obj.useGPU);
+            traj.loopDim = 5;
 			clear kloc
 			%%% Determine full non-linear encoding matrix
             if obj.subFactSpc>1
@@ -713,9 +736,9 @@ classdef sampHighOrder
                             obj.b0mask = interp3(double(obj.b0mask),Xnew,Ynew,Znew) > 0.5;
                         end
                     else
-                        [Xold,Yold] = meshgrid(1:obj.imSize(1),1:obj.imSize(2));
-                        [Xnew,Ynew] = meshgrid(linspace(1,obj.imSize(1),Nvox(1)),...
-                            linspace(1,obj.imSize(2),Nvox(2)));
+                        [Xold,Yold] = meshgrid(1:obj.imSize(2),1:obj.imSize(1));
+                        [Xnew,Ynew] = meshgrid(linspace(1,obj.imSize(2),Nvox(2)),...
+                            linspace(1,obj.imSize(1),Nvox(1)));
                         outvals = zeros([Nvox, 5],'like',obj.b0);
                         for ns = 1:obj.imSize(3)
                             outvals(:,:,ns,1) = interp2(obj.b0(:,:,ns),Xnew,Ynew);

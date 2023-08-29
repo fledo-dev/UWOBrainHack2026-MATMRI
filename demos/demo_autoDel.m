@@ -79,6 +79,10 @@ del0 = 0; % starting guess
 maxNit_cgne = length(resvec)-1;
 delJumpFact = 3;
 numCoarseSearch = 0;
+if gpuDeviceCount > 0
+    % findDelAuto determines whether to use gpu based on input data.
+    data = gpuArray(data);
+end
 [delFound, delSk_perIt] = findDelAuto(del0,data,tdwelltraj,phs_spha,phs_conc,datatime,grid,b0map,Crcvr,maxNit_cgne,delJumpFact,numCoarseSearch);
 fprintf('True delay = %.2f us. Found delay = %.2f us\n', delApplied, delFound);
 
