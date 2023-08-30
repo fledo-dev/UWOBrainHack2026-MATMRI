@@ -32,7 +32,7 @@ tic_a = tic;
 if nargin < 4
     maskfile = [];
 end
-if nargin < 5
+if (nargin < 5) || isempty(D_CSF)
     D_CSF = 3e-3;
 end
 
