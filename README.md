@@ -7,6 +7,7 @@
       - time varying spherical harmonics of phase accrual
   - diffusion MRI fitting
     - spatially regularized diffusion kurtosis fitting with an axially symmetric model (nii2kurt.m)
+    - free water corrected kurtosis and micro-FA (nii2uFA_fwe.m). Cite with doi: 10.3389/fnins.2023.1074730
     
 **Before Usage**
   - run setPath.m to add all the directories to the Matlab path
@@ -31,5 +32,6 @@
     - findDelAuto: Dubovan PI, Baron CA. Model-based determination of the synchronization delay between MRI and trajectory data. Magn Reson Med. 2022 Sep 26. doi:10.1002/mrm.29460.  
     - nufftOp: Baron CA, Dwork N, Pauly JM, Nishimura DG. Rapid compressed sensing reconstruction of 3D non-Cartesian MRI. Magn. Reson. Med. 2018;79:2685–2692.
     - sampHighOrder: Wilm BJ, Barmet C, Pruessmann KP. Fast higher-order MR image reconstruction using singular-vector separation. IEEE Trans Med Imaging. 2012 Jul;31(7):1396-403. doi: 10.1109/TMI.2012.2190991. Epub 2012 Mar 14. Erratum in: IEEE Trans Med Imaging. 2012 Sep;31(9):1833.
+    - nii2uFA_fwe: Arezza NJJ, Santini T, Omer M, Baron CA. Estimation of free water-corrected microscopic fractional anisotropy. Front Neurosci. 2023 Mar 7;17:1074730. doi: 10.3389/fnins.2023.1074730. 
 
 (c) 2020, Corey Baron

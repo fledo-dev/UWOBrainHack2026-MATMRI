@@ -36,15 +36,34 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
     if nargin<11
         delJumpFact = 3;
     end
+
+    % Check for data types
+    useSingle = 0;
+    useGPU = 0;
+    if isa(data_in,'gpuArray')
+        useGPU = 1;
+        if isaUnderlying(data_in,'single')
+            useSingle = 1;
+        end
+    else
+        if isa(data_in,'single')
+            useSingle = 1;
+        end
+    end
     
     tic1 = tic;
     fprintf('findDelAuto: Init guess %.2f; ', delSk0)
     
     % Basic prep computations
     numsamps = numCoarseSearch; % number of samples to try in initial course search
-    opt_cgne.stopOnResInc = 1;
-    R = rcvrOp(Crcvr,0); % Create receiver operator
-    interpThresh = 0;    % Disable interpolation for iterations, since it could affect the results.
+    opt_cgne.stopOnResInc = 1; % this never happens until noise starts amplifying, so it makes a good stopping criteria here.
+    % Create receiver operator
+    if useSingle
+        R = rcvrOp(single(Crcvr),0); 
+    else
+        R = rcvrOp(Crcvr,0);
+    end
+    approach = 0;    % Disable interpolation for iterations, since it could affect the results.
     dtsamp = datatime(2)-datatime(1);
 
     % Find numerical derivative of phs_spha and phs_conc
@@ -62,7 +81,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
             [phs_spha_a,phs_conc_a] = interpTrajTime(phs_spha,phs_conc,tdwell,delSk,datatime);
 
             % Update image
-            S = sampHighOrder(b0map, datatime(:), phs_spha_a', phs_conc_a', phs_sph_grid, [], [], [], interpThresh);
+            S = sampHighOrder(b0map, datatime(:), phs_spha_a', phs_conc_a', phs_sph_grid, [], useGPU, useSingle, approach);
             opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
             % Use the same number of iterations for all recons
             opt_cgne_c.stopOnResInc = 0;
@@ -92,7 +111,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
         [dspha_dt_a,dconc_dt_a] = interpTrajTime(dspha_dt,dconc_dt,tdwell,delSk,datatime);
 
         % Update image
-        S = sampHighOrder(b0map, datatime(:), phs_spha_a', phs_conc_a', phs_sph_grid, [], [], [], interpThresh);
+        S = sampHighOrder(b0map, datatime(:), phs_spha_a', phs_conc_a', phs_sph_grid, [], useGPU, useSingle, approach);
         opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
         if ntry>0
             % Use the same number of iterations for all recons
@@ -121,6 +140,9 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
         if ntry > 50
             warning('did not converge after %d iterations\n', ntry)
             break;
+        end
+        if useGPU
+            delSk = gather(delSk);
         end
     end
     delSk_perIt = delSk_perIt(1:ntry+1);
