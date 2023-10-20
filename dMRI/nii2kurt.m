@@ -115,6 +115,7 @@ end
 
 %% Read in files
 im = niftiread(file);
+im(im<10E-15)=10E-15; %We can get negative values after preprocessing
 szIm = size(im);
 bval = load([bfiles,'.bval']); 
 bvec = load([bfiles,'.bvec']);
@@ -143,7 +144,7 @@ bval = bval/1000;
 opt.bthresh = opt.bthresh/1000;
 
 % Perform some checks
-if bval > 3
+if max(bval) > 3
     warning('b-value greater than 3000 s/mm2 detected')
 end
 if opt.tvReg > 0 || opt.tvRegVec > 0
@@ -363,7 +364,18 @@ if opt.saveNifti
         end
         savename(savename=='.') = '_'; % niftiwrite does not like periods in name
     end
-    %
+    
+    % Bringing the calculated values to a resonable range
+    Dmean(Dmean>10 | Dmean<0) = 0;
+    Dpar(Dpar>10 | Dpar<0) = 0;
+    Dperp(Dpar>10 | Dperp<0) = 0;
+    Wmean(Wmean>10 | Wmean<0) = 0;
+    Kpar(Kpar>10 | Kpar<0) = 0;
+    Kperp(Kperp>10 | Kperp<0) = 0;
+    FA(FA>1.25 | FA<0) = 0;
+    Dpowder(Dpowder>10 | Dpowder<0) = 0;
+    Wpowder(Wpowder>10 | Wpowder<0) = 0;
+
     niftiwrite(single(Dmean), sprintf('%s_Dmean', savename), im_info, 'Compressed', true);
     niftiwrite(single(Dpar), sprintf('%s_Dpar', savename), im_info, 'Compressed', true);
     niftiwrite(single(Dperp), sprintf('%s_Dperp', savename), im_info, 'Compressed', true);
@@ -380,7 +392,7 @@ if opt.saveNifti
 %     im_info.ImageSize(5) = 3;
     im_info.ImageSize(4) = 3;
     im_info.raw.dim(5) = 3;
-    niftiwrite(single(FAvec), sprintf('%s_FAvec', savename), im_info, 'Compressed', true);
+    niftiwrite(single(abs(FAvec)), sprintf('%s_FAvec', savename), im_info, 'Compressed', true);
     dlmwrite(sprintf('%s.fshells', savename),fshells)
 end
 
