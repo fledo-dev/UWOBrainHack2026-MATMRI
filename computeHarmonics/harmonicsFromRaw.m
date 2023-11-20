@@ -58,9 +58,20 @@ if ~isfield(opt,'noConc') || isempty(opt.noConc)
     % Ignore concomitant gradients. Should only be used for debugging
     opt.noConc = false;
 end
+if ~isfield(opt,'compMat') || isempty(opt.compMat) 
+    % Compression matrix for basis fcn compression
+    opt.compMat = [];
+end
 coilParams = opt.coilParams;
 fitOrder = opt.fitOrder;
 
+% Check for incompatible options
+if ~isempty(opt.compMat)
+    opt.fitDoSteps = 0;
+    opt.fitDoResAdj = 0;
+    Nbasis = 4 + size(opt.compMat,1);
+    opt.fitInds = 1:Nbasis;
+end
 
 % Correct for probe field offsets
 times = (1:size(probe_raw,1))';
@@ -211,6 +222,10 @@ for nv = 1:size(phsRaw(:,:,:),3)
             else
                 error('Must choose order between 1 and 3')
             end
+            if ~isempty(opt.compMat) && (norder>1)
+                % Fit all at once for basis fcn compression
+                Nlb = Nbasis;
+            end
             if ~opt.fitDoSteps
                 % Here we need to do all orders at once, so we start from the
                 % first one (i.e., Nla=1) and go up to the one specified via
@@ -219,8 +234,13 @@ for nv = 1:size(phsRaw(:,:,:),3)
             end
             A = zeros(Nprobe, Nlb-Nla+1, 'like', phsRaw);
             for l=Nla:Nlb
-                basisIndex = opt.fitInds(l);
-                A(:,l-Nla+1) = basisFuncHarm(probe_positions(:,1),probe_positions(:,2),probe_positions(:,3),basisIndex);
+                if ~isempty(opt.compMat) && (l > 4)
+                    basisIndex = 4+(1:size(opt.compMat,2));
+                    A(:,l-Nla+1) = basisFuncHarm(probe_positions(:,1),probe_positions(:,2),probe_positions(:,3),basisIndex,[],opt.compMat(l-4,:));
+                else
+                    basisIndex = opt.fitInds(l);
+                    A(:,l-Nla+1) = basisFuncHarm(probe_positions(:,1),probe_positions(:,2),probe_positions(:,3),basisIndex);
+                end
             end
             phs_in = phsRaw_a.' - phs_pre;
             if norder_ind == 1
@@ -251,6 +271,28 @@ for nv = 1:size(phsRaw(:,:,:),3)
 end
 %figure; plot(resid)
 
+% Uncompress basis functions.
+if ~isempty(opt.compMat)
+    phs_spha = permute(phs_spha,[2 1 3:6]);
+    sz_a = size(phs_spha);
+    compMatInv = pinv(opt.compMat);
+    % Scale to SI units (compMat uses units of dm)
+    compMatInv(1:5) = 10^2*compMatInv(1:5); % 2nd order
+    if size(compMatInv,1) > 5
+        compMatInv(6:12) = 10^3*compMatInv(6:12); % 3nd order
+    end
+    if size(compMatInv,1) > 12
+        compMatInv(13:21) = 10^4*compMatInv(13:21); % 4th order
+    end
+    if size(compMatInv,1) > 21
+        compMatInv(22:32) = 10^5*compMatInv(22:32); % 5th order
+    end
+    % Uncompress 2nd and higher orders
+    phs_spha_a = compMatInv*phs_spha(5:end,:);
+    phs_spha_a = reshape(phs_spha_a, [size(phs_spha_a,1), sz_a(2:end)]);
+    phs_spha = cat(1, phs_spha(1:4,:,:,:,:,:), phs_spha_a);
+    phs_spha = permute(phs_spha,[2 1 3:6]);
+end
 
 % Format output and scale phase by gammas
 phs_spha = phs_spha * gammaMRI / gammaProbes;
