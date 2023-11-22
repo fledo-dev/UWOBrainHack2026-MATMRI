@@ -10,6 +10,8 @@ function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE] = nii2uFA
 %   isIso:      path to file in the same format as .bval file, but instead specifying 
 %                   which acquisitions are LTE (0 in file) or STE (1 in file)
 %                   Alternate Usage: the user may also input a matlab vector
+%                   Alternate Usage 2: provide a .bmat file that has the
+%                       full b-matrix. Expected format: Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
 %   D_CSF:      (optional) presumed ADC for CSF (mm2/s). default = 3e-3 
 %   maskfile:   (optional) path to NIFTI file containing a binary mask
 %   opt:        (optional) structure that contains options for algorithm.
@@ -108,11 +110,26 @@ if ischar(bvals)
 else
     bval = bvals;
 end
+clear bvals
 if ischar(isIso)
     % Text file, in the same format as .bval file, which indicates which
     % acquisitions are STE (1) and LTE (0). If this is not a string, we
     % presume the user inputted the list directly
     isIso = load(isIso);
+    if size(isIso,1) > 1 && size(isIso,2) > 1 
+        % Bmatrix supplied. Find isotropic ones that have similar
+        % bxx,byy,bzz and small cross terms
+        if size(isIso,1) == length(bval)
+            isIso = isIso';
+        end
+        if size(isIso,1) == 9 % Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
+            testVal1 = std(isIso([1,5,9],:),[],1)./bval;
+            testVal2 = mean(abs(isIso([2,3,6],:)),1);
+            isIso = and(testVal1 < 0.05, testVal2<opt.bthresh);
+        elseif size(isIso,1) == 6
+            error('TODO')
+        end
+    end
 end
 if isempty(maskfile)
     sz = size(im);
