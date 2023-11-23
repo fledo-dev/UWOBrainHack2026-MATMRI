@@ -1,4 +1,4 @@
-function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt)
+function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -11,7 +11,10 @@ function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE] = nii2uFA
 %                   which acquisitions are LTE (0 in file) or STE (1 in file)
 %                   Alternate Usage: the user may also input a matlab vector
 %                   Alternate Usage 2: provide a .bmat file that has the
-%                       full b-matrix. Expected format: Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
+%                       full b-matrix. Expected formats: 
+%                           Bxx Byy Bzz Bxy Bxz Byz
+%                             or
+%                           Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
 %   D_CSF:      (optional) presumed ADC for CSF (mm2/s). default = 3e-3 
 %   maskfile:   (optional) path to NIFTI file containing a binary mask
 %   opt:        (optional) structure that contains options for algorithm.
@@ -126,8 +129,10 @@ if ischar(isIso)
             testVal1 = std(isIso([1,5,9],:),[],1)./bval;
             testVal2 = mean(abs(isIso([2,3,6],:)),1);
             isIso = and(testVal1 < 0.05, testVal2<opt.bthresh);
-        elseif size(isIso,1) == 6
-            error('TODO')
+        elseif size(isIso,1) == 6 % Bxx Byy Bzz Bxy Bxz Byz
+            testVal1 = std(isIso(1:3,:),[],1)./bval;
+            testVal2 = mean(abs(isIso(4:6,:)),1);
+            isIso = and(testVal1 < 0.05, testVal2<opt.bthresh);
         end
     end
 end
@@ -277,6 +282,20 @@ if nargout > 5
     uFA_noFWE(mask)  = uFA2;
 end
 
+% Reformat dims of signal vectors
+tmp = zeros(sz(1:3),'like',im);
+sLTE = zeros([sz(1:3), size(signal_LTE,1)],'like',im);
+for n=1:size(signal_LTE,1)
+    tmp(mask) = signal_LTE(n,:);
+    sLTE(:,:,:,n) = tmp;
+end
+sSTE = zeros([sz(1:3), size(signal_STE,1)],'like',im);
+for n=1:size(signal_STE,1)
+    tmp(mask) = signal_STE(n,:);
+    sSTE(:,:,:,n) = tmp;
+end
+clear tmp
+
 % Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti && ischar(file)
     im_info = niftiinfo(file);
@@ -292,11 +311,12 @@ if opt.saveNifti && ischar(file)
     im_info.raw.datatype = 16;
     im_info.raw.bitpix = 32;
     % niftiwrite doesn't support names with periods, folders with periods are fine
-    [~,savename,ext] = fileparts(file);
+    [fpath,savename,ext] = fileparts(file);
     if strcmp(ext,'.gz')
         [~,savename,~] = fileparts(savename); 
     end
     savename(savename=='.') = '_'; % niftiwrite does not like periods in name
+    savename = [fpath,filesep,savename]; % put path back on
     %
     niftiwrite(single(D), sprintf('%s_D', savename), im_info, 'Compressed', true);
     niftiwrite(single(uFA), sprintf('%s_uFA', savename), im_info, 'Compressed', true);
@@ -309,6 +329,7 @@ if opt.saveNifti && ischar(file)
         niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
     end
+    %TODO: write out signal and FA (have code for tensor now)
 end
 
 fprintf('Total computation time: %.1f min\n', toc(tic_a)/60);
