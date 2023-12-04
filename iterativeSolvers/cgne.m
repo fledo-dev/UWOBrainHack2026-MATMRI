@@ -9,6 +9,8 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
     %
     %   gamma, R (optional): specify to perform regularization using matrix R and tuning factor gamma
     %           solves argmin_x ||sqrt(W)(Ax - b)||^2_2 + gamma||Rx||^2_2
+    %       Can provide these as cell arrays to have multiple
+    %       regularization fcns.
     %
     %   W (optional): allows weighting data consistency cost.
     %       e.g., density compensation based weighting, Magn Reson Med. 2018 May; 79(5): 2685–2692
@@ -86,7 +88,7 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         opt.gtruth = []; 
     end
     
-    if nargin<6 || (~isempty(gam) && all(gam == 0))
+    if nargin<6 || (~isempty(gam) && ~iscell(gam) && all(gam == 0))
         gam = [];
     end
     if nargin<7 || isempty(gam)
@@ -112,10 +114,21 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         A = @(x,transp) Asub(x,transp,Ain);
     end
     if ~isempty(Rin)
-        if isa(Rin,'function_handle')
-            R = Rin;
+        if iscell(Rin)
+            R = cell(size(Rin));
+            for nR = 1:length(Rin)
+                if isa(Rin{nR},'function_handle')
+                    R(nR) = Rin(nR);
+                else
+                    R{nR} = @(x,transp) Asub(x,transp,Rin{nR});
+                end
+            end
         else
-            R = @(x,transp) Asub(x,transp,Rin);
+            if isa(Rin,'function_handle')
+                R = Rin;
+            else
+                R = @(x,transp) Asub(x,transp,Rin);
+            end
         end
     end
     
@@ -156,7 +169,13 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
         res = b - A(A(xold, 'notransp'), 'transp');
     end
     if ~isempty(gam)
-        res = res - gam.*R(R(xold, 'notransp'), 'transp');
+        if iscell(R)
+            for nR = 1:length(R)
+                res = res - gam{nR}.*R{nR}(R{nR}(xold, 'notransp'), 'transp');
+            end
+        else
+            res = res - gam.*R(R(xold, 'notransp'), 'transp');
+        end
     end
     p = res;
     res_sq_old = res(:)' * res(:);
@@ -198,7 +217,13 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
             Ap = A(A(p, 'notransp'), 'transp');
         end
         if ~isempty(gam)
-            Ap = Ap + gam.*R(R(p, 'notransp'), 'transp');
+            if iscell(R)
+                for nR = 1:length(R)
+                    Ap = Ap + gam{nR}.*R{nR}(R{nR}(p, 'notransp'), 'transp');
+                end
+            else
+                Ap = Ap + gam.*R(R(p, 'notransp'), 'transp');
+            end
         end
         alph = res_sq_old / (p(:)' * Ap(:));
         x = xold + alph*p;
@@ -210,7 +235,13 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
                 res = b - A(A(x, 'notransp'), 'transp');
             end
             if ~isempty(gam)
-                res = res - gam.*R(R(x, 'notransp'), 'transp');
+                if iscell(R)
+                    for nR = 1:length(R)
+                        res = res - gam{nR}.*R{nR}(R{nR}(x, 'notransp'), 'transp');
+                    end
+                else
+                    res = res - gam.*R(R(x, 'notransp'), 'transp');
+                end
             end
             betaFact = 0;
         else
@@ -310,9 +341,19 @@ function [x, resSqAll, mseAll, xnormAll, xdiffAll, stopThresh, status] = cgne(Ai
 end
 
 function y = Asub(x,transp,Ain)
-    if strcmp(transp,'notransp')
-        y = Ain*x;
+    if numel(Ain) == 1
+        % Likely a object of some custom class
+        if strcmp(transp,'notransp')
+            y = Ain*x;
+        else
+            y = Ain'*x;
+        end
     else
-        y = Ain'*x;
+        % Likely a mask of some kind
+        if strcmp(transp,'notransp')
+            y = Ain.*x;
+        else
+            y = conj(Ain).*x;
+        end
     end
 end
