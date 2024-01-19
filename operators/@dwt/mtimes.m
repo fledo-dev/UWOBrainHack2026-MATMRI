@@ -22,7 +22,7 @@ function y = mtimes(obj,x)
         y = obj.AHAinvFcn(y,obj.APrep);
       end
     end
-    if obj.useGPU
+    if obj.useGPU && ~isgpuarray(x.low)
       y = gather(y);
     end
   end

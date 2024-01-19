@@ -32,6 +32,10 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         % Useful for simulations. Allows computation of mse per iteration
         opt.gtruth = []; 
     end
+    if nargin<7 || ~isfield(opt,'verbose')
+        % whether to provide information
+        opt.verbose = 1; 
+    end
     
     % Account for different ways of supplying A
     if isa(Ain,'function_handle')
@@ -58,7 +62,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         maxEig = powermethod(A,x0);
         fprintf('took %d sec\n', round(toc(tic1)));
     end
-    stepSz = 0.9/(2*abs(maxEig));
+    stepSz = gather(0.9/(2*abs(maxEig)));
 
     % Initialize
     y = x0;
@@ -90,6 +94,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     nit = 1;
     t_prev = 1;
     x_prev = x0;
+    strmsg = [];
     while ~finished
         % Find gradient for ||Ax-b||^2_2
         residual_y = A(y,'notransp')-bin;
@@ -142,7 +147,7 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         
         % Check for completion
         if nit >= NitMax
-            fprintf('bfista.m: stopped on NitMax after %d iterations\n', nit)
+            strmsg = 'NitMax';
             finished = 1;
         end
         if nit>1
@@ -150,10 +155,13 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
                 abs((RxAll(nit,2)-RxAll(nit-1,2))/RxAll(nit-1,2));
         end
         if (nit>1) && testVal<opt.resThresh
-            fprintf('bfista: stopped on opt.resThresh after %d iterations\n', nit)
+            strmsg = 'opt.resThresh';
             finished = 1;
         end
         nit = nit+1;
+    end
+    if opt.verbose
+        fprintf('bfista: stopped on %s after %d iterations\n', strmsg, nit);
     end
 
     % Clean up
