@@ -39,6 +39,7 @@ else
   error('Need 2 or 3 img dim')
 end
 
+s = rng;
 rng(1,'twister');
 R = zeros([Nimg,NrcvrXY*NrcvrZ]);
 if doSphere
@@ -79,3 +80,5 @@ for n=1:size(R,4)
 end
 
 R = squeeze(R);
+
+rng(s);

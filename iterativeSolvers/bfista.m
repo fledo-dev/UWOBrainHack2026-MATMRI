@@ -1,4 +1,4 @@
-function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
+function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     % Use balanced FISTA to solve argmin(||Ax-b||^2_2 + lam*||Rx||_1)  
     %
     % x = fista(Ain,bin,Rin,x0,NitMax,options)
@@ -6,6 +6,9 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     %   A must have a transpose that can be evaluated using A'*b, or as a function with A(b,'transp')
     %   A operates on x via A*x or A(x,'notransp')
     %   x0 and output of Ain are expected to be Nx1 vectors
+    %
+    %   Can enforce a bounded support in x using options.xMask 
+    %   See comments in code for information on other options.
     %
     %   For FISTA fundamentals, see Beck A, Teboulle M. A Fast Iterative Shrinkage-Thresholding Algorithm for Linear Inverse Problems. SIAM J. Imaging Sci. 2009;2:183–202.
     %   For balanced FISTA, see Ting ST, Ahmad R, Jin N, et al. Fast implementation for
@@ -35,6 +38,10 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     if nargin<7 || ~isfield(opt,'verbose')
         % whether to provide information
         opt.verbose = 1; 
+    end
+    if nargin<7 || ~isfield(opt,'xMask')
+        % whether to enforce bounded x-space support
+        opt.xMask = []; 
     end
     
     % Account for different ways of supplying A
@@ -98,8 +105,8 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     while ~finished
         % Find gradient for ||Ax-b||^2_2
         residual_y = A(y,'notransp')-bin;
-        resSqAll(nit,2) = residual_y(:)'*residual_y(:);
         grad = 2*A(residual_y,'transp');
+        resSqAll(nit,2) = residual_y(:)'*residual_y(:);
         
         % Perform the step along the gradient (this is just simple gradient decent)
         g = y - stepSz*grad;
@@ -119,6 +126,11 @@ function [x, resSqAll, RxAll, mseAll] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
         RxAll(nit,2) = gather(sum(tmp(:)));
         x = softthresh(x,lam*stepSz); 
         x = Rin'*x;
+
+        % Constrain support x-space using projection
+        if ~isempty(opt.xMask)
+            x = x.*opt.xMask;
+        end
         
         % Update tracking
         if nargout > 1
