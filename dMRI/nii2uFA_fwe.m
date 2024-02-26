@@ -329,7 +329,26 @@ if opt.saveNifti && ischar(file)
         niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
     end
-    %TODO: write out signal and FA (have code for tensor now)
+    %TODO: write out FA (have code for tensor now)
+    im_info0 = im_info;
+    if size(sSTE,4) > 1
+        im_info.PixelDimensions(4) = 1;
+        im_info.raw.dim(1) = 4;
+        im_info.raw.pixdim(5) = 1;
+        im_info.raw.dim(5) = size(sSTE,4);
+        im_info.ImageSize = [im_info.ImageSize, size(sSTE,4)];
+    end
+    niftiwrite(single(sSTE), sprintf('%s_sSTE', savename), im_info, 'Compressed', true);
+    im_info = im_info0;
+    if size(sLTE,4) > 1
+        im_info.PixelDimensions(4) = 1;
+        im_info.raw.dim(1) = 4;
+        im_info.raw.pixdim(5) = 1;
+        im_info.raw.dim(5) = size(sLTE,4);
+        im_info.ImageSize = [im_info.ImageSize, size(sLTE,4)];
+    end
+    niftiwrite(single(sLTE), sprintf('%s_sLTE', savename), im_info, 'Compressed', true);
+
 end
 
 fprintf('Total computation time: %.1f min\n', toc(tic_a)/60);
