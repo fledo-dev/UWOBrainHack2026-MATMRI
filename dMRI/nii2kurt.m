@@ -122,6 +122,8 @@ bvec = load([bfiles,'.bvec']);
 bval = bval(:);
 bvec = bvec.';
 bvec = bvec./sum(bvec.^2,2); % normalize
+bvec(isnan(bvec))=0; % avoid nan if bvec=[0 0 0] (b0)
+
 if ischar(freqs)
     % Text file, in the same format as .bval file, which indicates which
     % acquisitions are STE (1) and LTE (0). If this is not a string, we
