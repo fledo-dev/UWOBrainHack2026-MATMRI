@@ -35,6 +35,7 @@ function [Dmean,Dpar,Dperp,Wmean,Kpar,Kperp,FA,fshells,FAvec,Dpowder,Wpowder] = 
 %   opt:        (optional) structure that contains options for algorithm.
 %                   See comments where defaults are set in code for info.
 %   savename:   (optional) filename for output nifti. Exclude extension.
+%                It can be the fullpath+filename for a different output directory.
 %
 %   OUTPUTS
 %   Dmean,Dpar,Dperp,Wmean,Kpar,Kperp,FA,fshells,FAvec,Dpowder,Wpowder
@@ -348,12 +349,20 @@ FAvec = mean(FA,4).*vec;
 % Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti
     im_info = niftiinfo(file);
-    %im_info.PixelDimensions = im_info.PixelDimensions(1:3);
-    im_info.ImageSize(4) = length(fshells);
-    %im_info.raw.dim(1) = 3;
-    im_info.raw.dim(5) = length(fshells);
-    %im_info.raw.pixdim(5) = 0;
-    im_info.raw.dim_info = ' ';
+    if length(fshells) == 1
+        im_info.PixelDimensions = im_info.PixelDimensions(1:3);
+        im_info.ImageSize = im_info.ImageSize(1:3);
+        im_info.raw.dim(1) = 3;
+        im_info.raw.dim(5) = 1;
+        im_info.raw.pixdim(5) = 0;
+        im_info.raw.dim_info = ' ';
+    else
+        im_info = niftiinfo(file);
+        im_info.ImageSize(4) = length(fshells);
+        im_info.raw.dim(5) = length(fshells);
+        im_info.raw.dim_info = ' ';
+    end
+
     %
     im_info.Datatype = 'single';
     im_info.BitsPerPixel = 32;
@@ -387,13 +396,13 @@ if opt.saveNifti
     niftiwrite(single(FA), sprintf('%s_FA', savename), im_info, 'Compressed', true);
     niftiwrite(single(Dpowder), sprintf('%s_Dpowder', savename), im_info, 'Compressed', true);
     niftiwrite(single(Wpowder), sprintf('%s_Wpowder', savename), im_info, 'Compressed', true);
-%     im_info.PixelDimensions(5) = 1.0;
-%     im_info.raw.pixdim(6) = 1;
-%     im_info.raw.dim(1) = 5;
-%     im_info.raw.dim(6) = 3;
-%     im_info.ImageSize(5) = 3;
-    im_info.ImageSize(4) = 3;
-    im_info.raw.dim(5) = 3;
+
+    % update 4D nifti info data for FA vec file if multiple freq avialable
+    if length(fshells) > 1
+        im_info.ImageSize(4) = 3;
+        im_info.raw.dim(5) = 3;
+    end
+    
     niftiwrite(single(abs(FAvec)), sprintf('%s_FAvec', savename), im_info, 'Compressed', true);
     dlmwrite(sprintf('%s.fshells', savename),fshells)
 end
