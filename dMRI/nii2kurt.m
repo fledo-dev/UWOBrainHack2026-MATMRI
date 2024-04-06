@@ -349,7 +349,7 @@ FAvec = mean(FA,4).*vec;
 % Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti
     im_info = niftiinfo(file);
-    if length(fshells) == 1
+    if length(fshells) == 1 % Case for only one frq, so final images are 3D
         im_info.PixelDimensions = im_info.PixelDimensions(1:3);
         im_info.ImageSize = im_info.ImageSize(1:3);
         im_info.raw.dim(1) = 3;
@@ -357,7 +357,6 @@ if opt.saveNifti
         im_info.raw.pixdim(5) = 0;
         im_info.raw.dim_info = ' ';
     else
-        im_info = niftiinfo(file);
         im_info.ImageSize(4) = length(fshells);
         im_info.raw.dim(5) = length(fshells);
         im_info.raw.dim_info = ' ';
@@ -398,7 +397,10 @@ if opt.saveNifti
     niftiwrite(single(Wpowder), sprintf('%s_Wpowder', savename), im_info, 'Compressed', true);
 
     % update 4D nifti info data for FA vec file if multiple freq avialable
-    if length(fshells) > 1
+    if length(fshells) == 1 % Case for only one frq, so final images are 3D
+        im_info = niftiinfo(file);
+        im_info.ImageSize(4) = 3;
+    else
         im_info.ImageSize(4) = 3;
         im_info.raw.dim(5) = 3;
     end
