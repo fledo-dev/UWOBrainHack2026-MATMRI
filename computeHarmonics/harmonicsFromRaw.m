@@ -84,7 +84,7 @@ probemag_thresh = 0.001; %default value based on testing, change if needed
 probe_raw_norm = abs(probe_raw)./abs(probe_raw(1,:,:,:,:));
 probe_index = 1:size(probe_positions,1);
 for nprobe = 1:size(probe_positions,1)
-    if any(probe_raw_norm(:,nprobe,1,1) < probemag_thresh)
+    if sum(probe_raw_norm(:,nprobe,1,1) < probemag_thresh) > 0.01*size(probe_raw_norm,1)
         remove_ind = nprobe;
         probe_index(probe_index == remove_ind) = [];
         warning('Probe %d removed from fit due to raw probe amplitude falling below threshold\n', nprobe)
@@ -110,7 +110,7 @@ if isempty(opt.fitInds)
         end
     else
         if fitOrder == 3
-            if Nprobe < 16 & Nprobe >= 9
+            if Nprobe < 16 && Nprobe >= 9
                 fitOrder = 2;
                 warning('Fit order set to %d since not enough probes for desired order selection', fitOrder)
             elseif Nprobe < 9
@@ -131,13 +131,21 @@ if isempty(opt.fitInds)
             opt.fitInds = 1:9;
         case 3
             opt.fitInds = 1:16;
+        case 4
+            opt.fitInds = 1:25;
+        case 5
+            opt.fitInds = 1:36;
         otherwise
             error('unknown value for opt.fitOrder')
     end
 else
-    if max(opt.fitInds) >= 16
+    if max(opt.fitInds) > 25
+        fitOrder = 5;
+    elseif max(opt.fitInds) > 16
+        fitOrder = 4;
+    elseif max(opt.fitInds) > 9
         fitOrder = 3;
-    elseif max(opt.fitInds) >= 9
+    elseif max(opt.fitInds) > 4
         fitOrder = 2;
     else
         fitOrder = 1;
@@ -210,7 +218,13 @@ for nv = 1:size(phsRaw(:,:,:),3)
         for norder_ind = 1:length(norderAll)
             norder = norderAll(norder_ind);
             % Set matrix equation for normal spherical harmonic expansion of trajectory
-            if norder == 3
+            if norder == 5
+                Nla = find(opt.fitInds>=26,1,'first');
+                Nlb = find(opt.fitInds<=36,1,'last');
+            elseif norder == 4
+                Nla = find(opt.fitInds>=17,1,'first');
+                Nlb = find(opt.fitInds<=25,1,'last');
+            elseif norder == 3
                 Nla = find(opt.fitInds>=10,1,'first');
                 Nlb = find(opt.fitInds<=16,1,'last');
             elseif norder == 2

@@ -22,7 +22,7 @@ function bfuncOut = basisFuncHarm(x,y,z,n,subInds,weights)
     for n_ind = 1:numel(n)
         n_a = n(n_ind);
         switch n_a
-        case 1
+            case 1
             bfunc = ones(size(x), 'like', x);
         case 2
             bfunc = x;
@@ -77,23 +77,23 @@ function bfuncOut = basisFuncHarm(x,y,z,n,subInds,weights)
         case 27                
             bfunc = x.*y.*z.*(x.^2 - y.^2);
         case 28                
-            bfunc = y.*((x.^2 + y.^2 + z.^2).^2 - 9.*z.^2).*(y.^2 - 3.*x.^2);
+            bfunc = y.*((x.^2 + y.^2 + z.^2) - 9.*z.^2).*(y.^2 - 3.*x.^2);
         case 29                
-            bfunc = x.*y.*z.*(3.*z.^2 - (x.^2 + y.^2 + z.^2).^3);
+            bfunc = x.*y.*z.*(3.*z.^2 - (x.^2 + y.^2 + z.^2));
         case 30                
-            bfunc = y.*((x.^2 + y.^2 + z.^2).^4 - 14.*(x.^2 + y.^2 + z.^2).^2.*z.^2 + 21.*z.^4);
+            bfunc = y.*((x.^2 + y.^2 + z.^2).^2 - 14.*(x.^2 + y.^2 + z.^2).*z.^2 + 21.*z.^4);
         case 31               
-            bfunc = 63.*z.^5 - 70.*z.^3.*(x.^2 + y.^2 + z.^2).^2 + 15.*z.*(x.^2 + y.^2 + z.^2).^4;
+            bfunc = 63.*z.^5 - 70.*z.^3.*(x.^2 + y.^2 + z.^2) + 15.*z.*(x.^2 + y.^2 + z.^2).^2;
         case 32                
-            bfunc = x.*((x.^2 + y.^2 + z.^2).^4 - 14.*(x.^2 + y.^2 + z.^2).^2.*z.^2 + 21.*z.^4);
+            bfunc = x.*((x.^2 + y.^2 + z.^2).^2 - 14.*(x.^2 + y.^2 + z.^2).*z.^2 + 21.*z.^4);
         case 33               
-            bfunc = z.*(3.*z.^2 - (x.^2 + y.^2 + z.^2).^3).*(x.^2 - y.^2);
+            bfunc = z.*(3.*z.^2 - (x.^2 + y.^2 + z.^2)).*(x.^2 - y.^2);
         case 34               
             bfunc = x.*((x.^2 + y.^2 + z.^2) - 9.*z.^2).*(3.*y.^2 - x.^2);
         case 35                
             bfunc = z.*(x.^4 - 6.*x.^2.*y.^2 + y.^4);
         case 36                
-            bfunc = x.^5 - 10.*x.^3.*y.^2 + 5.*x.*y.^4; 
+            bfunc = x.^5 - 10.*x.^3.*y.^2 + 5.*x.*y.^4;  
         otherwise
             error('Basis function undefined.')
         end
