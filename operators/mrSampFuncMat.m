@@ -1,4 +1,4 @@
-function [AtA,Aty] = mrSampFuncMat(y,Crcvr,b0,sampTimes,phs_spha,phs_conc,phs_grid)
+function [AtA,Aty] = mrSampFuncMat(y,Crcvr,b0,sampTimes,phs_spha,phs_conc,phs_grid,imMask)
 % Create A'*A and A'*y, where A is the dense MRI sampling matrix and y is the data vector. 
 %   Modern GPUs make it feasible to store the dense array for a single slice, 
 %   making non-iterative solutions possible 
@@ -20,6 +20,7 @@ function [AtA,Aty] = mrSampFuncMat(y,Crcvr,b0,sampTimes,phs_spha,phs_conc,phs_gr
 %
 
 % Create sampling operator that does not include receivers
+% TODO: imMask could be an input here for a slight speedup
 S = sampHighOrder(b0,sampTimes,phs_spha,phs_conc,phs_grid);
 
 % Build receiver operator
@@ -27,17 +28,21 @@ R = rcvrOp(Crcvr,0);
 
 % Create data vector output
 Aty = R'*(S'*y);
-sz = size(Aty);
+Aty = Aty(imMask(:));
 
 % Create R'*S'*S*R
 R = single(R.maps);
 S = reshape(single(S.kbase), numel(b0), []).';
-S = exp(1i*S)/sqrt(prod(sz));
+S = S(:,imMask(:));
+S = exp(1i*S)/sqrt(numel(Aty));
 S = S'*S;
 AtA = 0;
 for n=1:size(R,4)
-    AtA = AtA + conj(reshape(R(:,:,:,n),size(S,1),1)).*S.*reshape(R(:,:,:,n),1,size(S,2)); 
+    tmp = R(:,:,:,n);
+    tmp = reshape(tmp(imMask(:)), 1, []);
+    AtA = AtA + tmp'.*S.*tmp; 
 end
+
 
 
 end

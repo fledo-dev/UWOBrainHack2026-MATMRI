@@ -5,6 +5,8 @@
 %
 %  (c) Corey Baron, 2022
 
+clear
+
 % To make things simple, we'll start with actual acquired data for 
 % the B0 map, receiver sensitivity, and a ground truth image
 load data_images.mat
@@ -17,6 +19,10 @@ Z = Z(:,:,nsl);
 im0 = im0(:,:,nsl);
 b0map = b0map(:,:,nsl);
 Crcvr = Crcvr(:,:,nsl,:);
+
+% Define a mask, which can be used to speed up direct method
+imMask = im0 > 0.0001;
+Crcvr = Crcvr.*imMask;
 
 % The receivers are actually virtual coils from coil compression, so we can
 % only use a subset to save time for the purposes of this demo.
@@ -45,7 +51,10 @@ grid.z = Z;
 
 % Interpolate trajectory samples to typical MRI sampling rate
 [phs_spha,phs_conc] = interpTrajTime(phs_spha,phs_conc,tdwelltraj,dataStartTime,datatime);
-S = sampHighOrder(b0map,datatime(:),phs_spha',phs_conc',grid);
+tic0 = tic;
+S = sampHighOrder(b0map,datatime(:),phs_spha',phs_conc',grid,[],[],[],1);
+toc0 = toc(tic0);
+fprintf('Took %.2f seconds to create sampling object\n', toc0);
 
 % Build receiver operator
 R = rcvrOp(Crcvr,0);
@@ -71,17 +80,24 @@ maxIt = 50;
 opt.noiseVar = 2*ns_std^2; % Factor of 2 for complex data 
 opt.nseExtraIt = 6; % Extra iterations after reaching residual expected from noise 
 [im1, resvec, mse, xnorm, xdiff] = cgne(opFunc,data,[],maxIt,opt); 
-fprintf('Iterative method took %d seconds\n', round(toc(tic1)));
+fprintf('Iterative method took %.2f seconds\n', toc(tic1));
 
 
 %% Direct method
 % Clear S and R to save memory
-clear S R
+clear S R 
 
 tic2 = tic;
 % Create dense matrices
-[AtA,Aty] = mrSampFuncMat(data,Crcvr,b0map,datatime(:),phs_spha',phs_conc',grid);
-fprintf('Took %d seconds to find dense matrix\n', round(toc(tic2)));
+[AtA,Aty] = mrSampFuncMat(data,Crcvr,b0map,datatime(:),phs_spha',phs_conc',grid,imMask);
+fprintf('Took %.2f seconds to find dense matrix\n', toc(tic2));
+
+% % Do LU factorization, which is useful when AtA is reused
+% tic3 = tic;
+% [L,U,P] = lu(AtA);
+% clear AtA
+% fprintf('Took %.2f seconds to LU factorize\n', toc(tic3));
+% return
 
 % Tikhonov regularization  
 % We find the regularization weighting that satisfies the discrepancy
@@ -93,6 +109,7 @@ resVals = zeros(length(lam2Vals),1);
 regVals = zeros(length(lam2Vals),1);
 im2All = zeros([size(im0), length(lam2Vals)]);
 di = size(AtA,1);
+im2_a = zeros(size(im0));
 for nlam = 1:length(lam2Vals)
     lam2 = lam2Vals(nlam);
     AtA(1:di+1:numel(AtA)) = AtA(1:di+1:numel(AtA)) + lam2; % The square of the lambda value just gets added to the diagonal.
@@ -102,7 +119,8 @@ for nlam = 1:length(lam2Vals)
     tmp = AtA*im2 - Aty(:);
     resVals(nlam) = norm(gather(tmp));
     regVals(nlam) = norm(gather(im2(:)));
-    im2All(:,:,nlam) = double(gather(reshape(im2,size(im0))));    
+    im2_a(imMask(:)) = gather(im2);
+    im2All(:,:,nlam) = double(im2_a);    
 end
 figure; 
 subplot(2,2,1); plot(log10(resVals.^2), log10(regVals.^2), '-o')
@@ -134,9 +152,10 @@ fprintf('  log10(residual) from discrepancy principle is %g, which yields lam2 ~
 
 tic3 = tic;
 AtA(1:di+1:numel(AtA)) = AtA(1:di+1:numel(AtA)) + lam2;
-im2 = AtA\Aty(:);
-im2 = gather(reshape(im2,size(im0)));
-fprintf('Direct method took %d seconds\n', round(toc(tic3)));
+im2_a = AtA\Aty(:);
+im2 = zeros(size(im0));
+im2(imMask(:)) = gather(im2_a);
+fprintf('Direct method took %.2f seconds\n', toc(tic3));
 clear AtA Aty
 
 figure; 
