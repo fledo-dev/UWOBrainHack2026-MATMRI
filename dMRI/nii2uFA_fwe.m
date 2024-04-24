@@ -111,6 +111,7 @@ end
 %% Read in files
 if ischar(file)
     im = niftiread(file);
+    im = single(im);
 else
     % Allow directly supplying array data
     im = file;

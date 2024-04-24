@@ -116,6 +116,7 @@ end
 
 %% Read in files
 im = niftiread(file);
+im = single(im); % convert to single. Log function doesnt work with integer types.
 im(im<10E-15)=10E-15; %We can get negative values after preprocessing
 szIm = size(im);
 bval = load([bfiles,'.bval']); 
@@ -400,6 +401,11 @@ if opt.saveNifti
     if length(fshells) == 1 % Case for only one frq, so final images are 3D
         im_info = niftiinfo(file);
         im_info.ImageSize(4) = 3;
+
+        im_info.Datatype = 'single';
+        im_info.BitsPerPixel = 32;
+        im_info.raw.datatype = 16;
+        im_info.raw.bitpix = 32;
     else
         im_info.ImageSize(4) = 3;
         im_info.raw.dim(5) = 3;
