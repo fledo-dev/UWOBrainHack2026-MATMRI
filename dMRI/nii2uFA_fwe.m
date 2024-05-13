@@ -1,4 +1,4 @@
-function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt)
+function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -19,6 +19,8 @@ function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE]
 %   maskfile:   (optional) path to NIFTI file containing a binary mask
 %   opt:        (optional) structure that contains options for algorithm.
 %                   See comments where defaults are set in code for info.
+%   savename:   (optional) filename for output nifti. Exclude extension.
+%                It can be the fullpath+filename for a different output directory.
 %
 %   OUTPUTS
 %   uFA:        FWE corrected microscopic fractional anisotropy
@@ -46,6 +48,11 @@ if nargin<6 || ~isfield(opt,'bthresh') || isempty(opt.bthresh)
     % Threshold for difference between b-shells
     opt.bthresh = 50;
 end
+
+if nargin<7
+    savename = [];
+end
+
 if ~isfield(opt,'noGPU') || isempty(opt.noGPU)
     % Disable automatic usage of GPU
     opt.noGPU = 0;
@@ -104,6 +111,7 @@ end
 %% Read in files
 if ischar(file)
     im = niftiread(file);
+    im = single(im);
 else
     % Allow directly supplying array data
     im = file;
@@ -310,14 +318,16 @@ if opt.saveNifti && ischar(file)
     im_info.BitsPerPixel = 32;
     im_info.raw.datatype = 16;
     im_info.raw.bitpix = 32;
-    % niftiwrite doesn't support names with periods, folders with periods are fine
-    [fpath,savename,ext] = fileparts(file);
-    if strcmp(ext,'.gz')
-        [~,savename,~] = fileparts(savename); 
+
+    if isempty(savename)
+        [filepath,savename,ext] = fileparts(file);
+        if strcmp(ext,'.gz')
+            [~,savename,~] = fileparts(savename); 
+        end
+        savename(savename=='.') = '_'; % niftiwrite does not like periods in name
+        % savename = [fpath,filesep,savename]; % put path back on
     end
-    savename(savename=='.') = '_'; % niftiwrite does not like periods in name
-    savename = [fpath,filesep,savename]; % put path back on
-    %
+
     niftiwrite(single(D), sprintf('%s_D', savename), im_info, 'Compressed', true);
     niftiwrite(single(uFA), sprintf('%s_uFA', savename), im_info, 'Compressed', true);
     niftiwrite(single(Kiso), sprintf('%s_Kiso', savename), im_info, 'Compressed', true);

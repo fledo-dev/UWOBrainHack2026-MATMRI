@@ -35,6 +35,7 @@ function [Dmean,Dpar,Dperp,Wmean,Kpar,Kperp,FA,fshells,FAvec,Dpowder,Wpowder] = 
 %   opt:        (optional) structure that contains options for algorithm.
 %                   See comments where defaults are set in code for info.
 %   savename:   (optional) filename for output nifti. Exclude extension.
+%                It can be the fullpath+filename for a different output directory.
 %
 %   OUTPUTS
 %   Dmean,Dpar,Dperp,Wmean,Kpar,Kperp,FA,fshells,FAvec,Dpowder,Wpowder
@@ -115,6 +116,7 @@ end
 
 %% Read in files
 im = niftiread(file);
+im = single(im); % convert to single. Log function doesnt work with integer types.
 im(im<10E-15)=10E-15; %We can get negative values after preprocessing
 szIm = size(im);
 bval = load([bfiles,'.bval']); 
@@ -122,6 +124,8 @@ bvec = load([bfiles,'.bvec']);
 bval = bval(:);
 bvec = bvec.';
 bvec = bvec./sum(bvec.^2,2); % normalize
+bvec(isnan(bvec))=0; % avoid nan if bvec=[0 0 0] (b0)
+
 if ischar(freqs)
     % Text file, in the same format as .bval file, which indicates which
     % acquisitions are STE (1) and LTE (0). If this is not a string, we
@@ -346,12 +350,19 @@ FAvec = mean(FA,4).*vec;
 % Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti
     im_info = niftiinfo(file);
-    %im_info.PixelDimensions = im_info.PixelDimensions(1:3);
-    im_info.ImageSize(4) = length(fshells);
-    %im_info.raw.dim(1) = 3;
-    im_info.raw.dim(5) = length(fshells);
-    %im_info.raw.pixdim(5) = 0;
-    im_info.raw.dim_info = ' ';
+    if length(fshells) == 1 % Case for only one frq, so final images are 3D
+        im_info.PixelDimensions = im_info.PixelDimensions(1:3);
+        im_info.ImageSize = im_info.ImageSize(1:3);
+        im_info.raw.dim(1) = 3;
+        im_info.raw.dim(5) = 1;
+        im_info.raw.pixdim(5) = 0;
+        im_info.raw.dim_info = ' ';
+    else
+        im_info.ImageSize(4) = length(fshells);
+        im_info.raw.dim(5) = length(fshells);
+        im_info.raw.dim_info = ' ';
+    end
+
     %
     im_info.Datatype = 'single';
     im_info.BitsPerPixel = 32;
@@ -385,13 +396,21 @@ if opt.saveNifti
     niftiwrite(single(FA), sprintf('%s_FA', savename), im_info, 'Compressed', true);
     niftiwrite(single(Dpowder), sprintf('%s_Dpowder', savename), im_info, 'Compressed', true);
     niftiwrite(single(Wpowder), sprintf('%s_Wpowder', savename), im_info, 'Compressed', true);
-%     im_info.PixelDimensions(5) = 1.0;
-%     im_info.raw.pixdim(6) = 1;
-%     im_info.raw.dim(1) = 5;
-%     im_info.raw.dim(6) = 3;
-%     im_info.ImageSize(5) = 3;
-    im_info.ImageSize(4) = 3;
-    im_info.raw.dim(5) = 3;
+
+    % update 4D nifti info data for FA vec file if multiple freq avialable
+    if length(fshells) == 1 % Case for only one frq, so final images are 3D
+        im_info = niftiinfo(file);
+        im_info.ImageSize(4) = 3;
+
+        im_info.Datatype = 'single';
+        im_info.BitsPerPixel = 32;
+        im_info.raw.datatype = 16;
+        im_info.raw.bitpix = 32;
+    else
+        im_info.ImageSize(4) = 3;
+        im_info.raw.dim(5) = 3;
+    end
+    
     niftiwrite(single(abs(FAvec)), sprintf('%s_FAvec', savename), im_info, 'Compressed', true);
     dlmwrite(sprintf('%s.fshells', savename),fshells)
 end
