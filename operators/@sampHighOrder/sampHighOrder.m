@@ -723,7 +723,7 @@ classdef sampHighOrder
                         obj.b0mask = interp2(double(obj.b0mask),Xnew,Ynew) > 0.5;
                     end
                 elseif obj.NDim == 3
-                    if obj.imSize > obj.num3DSlc
+                    if obj.imSize(3) > obj.num3DSlc
                         error('3D untested')
                         [Xold,Yold,Zold] = meshgrid(1:obj.imSize(1),1:obj.imSize(2),1:obj.imSize(3));
                         [Xnew,Ynew,Znew] = meshgrid(linspace(1,obj.imSize(1),Nvox(1)),...
@@ -775,6 +775,17 @@ classdef sampHighOrder
             end
             % Find the full encoding matrix, less the terms included in nufft
             b = prepForDirect(obj,phs_spha_in,phs_conc_in,sampTimes_in,[1,strtIndSpha:size(obj.phs_spha,1)]);
+            b0mask_a = [];
+            if ~isempty(obj.b0mask)
+                % Only account for b on the mask in svd.
+                b0mask_a = obj.b0mask;
+                if obj.imSize(3) <= obj.num3DSlc
+                    % Account for SMS, where the mask should be identical
+                    % for each slice
+                    b0mask_a = repmat(max(b0mask_a,[],3), [1 1 obj.imSize(3)]);
+                end
+                b = b(b0mask_a(:) > 0.5, :);
+            end
             b = exp(1i*b);
             % Find largest singular values and vectors. Should replace
             % below with svdsketch once it supports GPU.
@@ -815,6 +826,12 @@ classdef sampHighOrder
                 svdTime = reshape(svdTime, [prod(obj.kSize), Ns]);
             end
             svdSpace = U(:,1:Ns);
+            if ~isempty(b0mask_a)
+                svdSpace_a = zeros(numel(b0mask_a), Ns, 'like', U);
+                svdSpace_a(b0mask_a(:)>0.5,:) = svdSpace;
+                svdSpace = svdSpace_a;
+                clear svdSpace_a
+            end
             if obj.subFactSpc > 1
                 % Fill back in values if interpolation was used in space.
                 % Note that fft zero filling is not recommended, because it
@@ -832,7 +849,7 @@ classdef sampHighOrder
                         svdSpaceOut(:,:,n) = mag.*exp(1i*angle(compl));
                     end
                 elseif obj.NDim == 3
-                    if obj.imSize > obj.num3DSlc
+                    if obj.imSize(3) > obj.num3DSlc
                         error('3D untested')
                     else
                         for n=1:Ns
