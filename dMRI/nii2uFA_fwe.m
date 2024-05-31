@@ -1,4 +1,4 @@
-function [uFA,Kiso,Klin,D,sf, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt, savename)
+function [uFA,Kiso,Klin,D,sf,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -244,12 +244,25 @@ end
 sf2 = sigTissue./(sigTissue + sigCSF);
 uFA2 = computeUFA(Klin2,Kiso2);
 
+% Compute uA^22 if the shells support it
+uA2 = [];
+uA22 = [];
+if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste))) < 0.05
+    [~,ind_lte] = max(bshells_lte);
+    [~,ind_ste] = max(bshells_ste);
+    uA22 = log(signal_LTE(ind_lte,:)./signal_STE(ind_ste,:))/mean(bshells_lte(ind_lte),bshells_ste(ind_ste))^2;
+    uA22(uA22 < 0) = 0;
+end
+
 if useGPU
     D2 = gather(D2);
     Klin2 = gather(Klin2);
     Kiso2 = gather(Kiso2);
     sf2 = gather(sf2);
     uFA2 = gather(uFA2);
+    if ~isempty(uA22)
+        uA2 = gather(uA2);
+    end
 end
 
 % Reshape the output matrices into the same size as the original image volume
@@ -264,9 +277,13 @@ Kiso(mask) = Kiso2;
 Klin(mask) = Klin2;
 sf(mask) = sf2;
 uFA(mask) = uFA2;
+if ~isempty(uA22)
+    uA2  = zeros(sz(1:3),'like',im);
+    uA2(mask) = uA22;
+end
 
 %% Compute regular uFA for comparison
-if nargout > 5
+if nargout > 6
     [D2,Klin2,Kiso2] =...
         estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
     uFA2 = computeUFA(Klin2,Kiso2);
@@ -333,7 +350,10 @@ if opt.saveNifti && ischar(file)
     niftiwrite(single(Kiso), sprintf('%s_Kiso', savename), im_info, 'Compressed', true);
     niftiwrite(single(Klin), sprintf('%s_Klin', savename), im_info, 'Compressed', true);
     niftiwrite(single(sf), sprintf('%s_sigFrac', savename), im_info, 'Compressed', true);
-    if nargout > 5
+    if ~isempty(uA2)
+        niftiwrite(single(uA2), sprintf('%s_uA2', savename), im_info, 'Compressed', true);
+    end
+    if nargout > 6
         niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
