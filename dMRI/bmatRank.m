@@ -3,6 +3,8 @@ function rankOut = bmatRank(bmat)
 % entries (s/mm2), dim 2 should be number of acquisitions. 
 % %  6 matrix entries makes symmetric matrices be assumed. First three are
 % diagonal (xx, yy, zz), next are cross terms (xy, xz, yz).
+%
+% b = 0 scans, where all eigenvalues will be below the threshold, will have rank of 1
 
 % Set threshold used for eigenvalues (s/mm^2)
 eigThresh = 5;
