@@ -1,4 +1,4 @@
-function extractLTE(nii_in,bmatFile, bvalFile, bvecFile, saveMode, bthresh)
+function niiExtractLTE(nii_in,bmatFile, bvalFile, bvecFile, saveMode, bthresh)
 % Function to extract LTE scans from a b-tensor encoding scan nifti file
 %    Alternate usage: provide empty array for nii_in, and files are saved
 %    listing the indices related to the chosen savemode. Indices use base 0
@@ -16,8 +16,7 @@ if (nargin < 5) || isempty(saveMode)
     % 1: save LTE + b0 in one file, and STE in another file. bthresh is
     %    ignored for this case, and b0 is included based on code in bmatRank.m
     % 2: save b0, LTE, and STE in three separate files. 
-    % 3: save LTE + b0 in one file and STE + b0 in another. Also saves an
-    %    index list for STE for STE+b0 file. 
+    % 3: save LTE + b0 in one file and STE + b0 in another.  
     %    CAUTION: duplicates b0 images. Be sure not to use duplicated b0
     %    images in later analysis.
     saveMode = 0;
@@ -36,12 +35,16 @@ if ~isempty(nii_in)
     info = niftiinfo(nii_in);
     im = niftiread(nii_in);
 end
-brank = bmatRank(load(bmatFile));
+[brank, bvecFromMat] = bmatRank(load(bmatFile));
 if ~isempty(bvalFile)
     bval = load(bvalFile);
 end
 if ~isempty(bvecFile)
     bvec = load(bvecFile);
+    % Replace with bvec from bmat
+    sgn = sign(bvec);
+    sgn(sgn==0) = 1;
+    bvec = sgn.*abs(bvecFromMat);
 end
 
 % Get filename
@@ -91,21 +94,11 @@ elseif saveMode == 3
     if any(brank > 2.5)
         inds = or(inds_b0,brank>2.5);
         save_nii(fpath,inds,im,info,[fname,'_b0_STE'],bval,bvec);
-        % Save the indices corresponding to STE only for this file
-        inds_b0_a = inds_b0(inds);
-        brank_a = brank(inds);
-        inds = and(~inds_b0_a,brank_a>2.5);
-        save_nii(fpath,inds,[],[],[fname,'_STE_from_b0_STE'],bval,bvec);
     end
     %
     if any(and(brank>=1.5,brank<=2.5))
         inds = or(inds_b0,and(brank>=1.5,brank<=2.5));
         save_nii(fpath,inds,im,info,[fname,'_b0_PTE'],bval,bvec);
-        % Save the indices corresponding to STE only for this file
-        inds_b0_a = inds_b0(inds);
-        brank_a = brank(inds);
-        inds = and(~inds_b0_a,and(brank_a>=1.5,brank_a<=2.5));
-        save_nii(fpath,inds,[],[],[fname,'_PTE_from_b0_PTE'],bval,bvec);
     end
 else
     error('unknown saveMode')
