@@ -126,21 +126,17 @@ if ischar(isIso)
     % Text file, in the same format as .bval file, which indicates which
     % acquisitions are STE (1) and LTE (0). If this is not a string, we
     % presume the user inputted the list directly
-    isIso = load(isIso);
-    if size(isIso,1) > 1 && size(isIso,2) > 1 
-        % Bmatrix supplied. Find isotropic ones that have similar
-        % bxx,byy,bzz and small cross terms
-        if size(isIso,1) == length(bval)
-            isIso = isIso';
+    bmat = load(isIso);
+    if size(bmat,1) > 1 && size(bmat,2) > 1 
+        % Bmatrix supplied. Find isotropic ones that have a bmatrix rank of
+        % 3
+        if size(bmat,1) == length(bval)
+            bmat = bmat';
         end
-        if size(isIso,1) == 9 % Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
-            testVal1 = std(isIso([1,5,9],:),[],1)./bval;
-            testVal2 = mean(abs(isIso([2,3,6],:)),1);
-            isIso = and(testVal1 < 0.05, testVal2<opt.bthresh);
-        elseif size(isIso,1) == 6 % Bxx Byy Bzz Bxy Bxz Byz
-            testVal1 = std(isIso(1:3,:),[],1)./bval;
-            testVal2 = mean(abs(isIso(4:6,:)),1);
-            isIso = and(testVal1 < 0.05, testVal2<opt.bthresh);
+        brank = bmatRank(bmat, opt.bthresh/3);
+        isIso = brank > 2.5;
+        if any(brank==2)
+            error('Planar encoding detected, but fitting model does not account for this');
         end
     end
 end
@@ -193,6 +189,17 @@ for n=1:length(bshells_lte)
 end
 bshells_ste=sort(bshells_ste,'ascend');
 bshells_lte=sort(bshells_lte,'ascend');
+
+% Print the shells
+fprintf('nii2uFA_fwe: LTE shells:'); 
+for n=1:length(bshells_lte)
+    fprintf(' %d,', round(bshells_lte(n)));
+end
+fprintf('. STE shells:'); 
+ for n=1:length(bshells_ste)
+    fprintf(' %d', round(bshells_ste(n)));
+ end   
+fprintf('\n'); 
 
 
 %% Perform powder averaging, and extract voxels from mask
