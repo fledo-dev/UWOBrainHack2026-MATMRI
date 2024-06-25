@@ -118,6 +118,47 @@ classdef waveletObj
         function obj = times(alpha,obj) 
             obj = mtimes(alpha,obj);
         end
+
+        function obj = rdivide(alpha,obj) 
+            % Note: for different alphas at different levels/subbands,
+            % alpha should be of the waveletObj class. Can have a different
+            % scalar at each level or subband (and in extra field)
+            if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
+                % case scalar * wavelet
+                obj.low = alpha ./ obj.low;
+                for i = 1:length(obj.high)
+                    for m = 1:length(obj.high{i})
+                        obj.high{i}{m} = alpha ./ obj.high{i}{m};
+                    end
+                end
+                if ~isempty(obj.extra)
+                    obj.extra = alpha ./ obj.extra;
+                end
+            elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
+                % case wavelet * scalar
+                alpha.low = alpha.low ./ obj;
+                for i = 1:length(alpha.high)
+                    for m = 1:length(alpha.high{i})
+                        alpha.high{i}{m} = alpha.high{i}{m} ./ obj;
+                    end
+                end
+                if ~isempty(alpha.extra)
+                    alpha.extra = alpha.extra ./ obj;
+                end
+                obj = alpha;
+            elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
+                % case wavelet * wavelet
+                obj.low = alpha.low ./ obj.low;
+                for i = 1:length(obj.high)
+                    for m = 1:length(obj.high{i})
+                        obj.high{i}{m} = alpha.high{i}{m} ./ obj.high{i}{m};
+                    end
+                end
+                if ~isempty(obj.extra)
+                    obj.extra = alpha.extra ./ obj.extra;
+                end
+            end
+        end
         
         function obj = minus(alpha,obj)
             obj = -obj;
@@ -126,7 +167,7 @@ classdef waveletObj
         
         function obj = plus(alpha,obj)
             if ~isa(alpha, 'waveletObj') && isa(obj, 'waveletObj')
-                % case scalar * wavelet
+                % case scalar + wavelet
                 obj.low = plus(alpha, obj.low);
                 for i = 1:length(obj.high)
                     for m = 1:length(obj.high{i})
@@ -137,10 +178,19 @@ classdef waveletObj
                     obj.extra = plus(alpha, obj.extra);
                 end
             elseif isa(alpha, 'waveletObj') && ~isa(obj, 'waveletObj') 
-                % case wavelet * scalar
-                obj = plus(obj,alpha);
+                % case wavelet + scalar
+                alpha.low = plus(obj, alpha.low);
+                for i = 1:length(alpha.high)
+                    for m = 1:length(alpha.high{i})
+                        alpha.high{i}{m} = plus(obj, alpha.high{i}{m});
+                    end
+                end
+                if ~isempty(alpha.extra)
+                    alpha.extra = plus(obj, alpha.extra);
+                end
+                obj = alpha;
             elseif isa(alpha, 'waveletObj') && isa(obj, 'waveletObj') 
-                % case wavelet * wavelet
+                % case wavelet + wavelet
                 obj.low = plus(alpha.low, obj.low);
                 for i = 1:length(obj.high)
                     for m = 1:length(obj.high{i})
