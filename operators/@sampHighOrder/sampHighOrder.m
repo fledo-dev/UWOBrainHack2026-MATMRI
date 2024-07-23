@@ -779,7 +779,7 @@ classdef sampHighOrder
             if ~isempty(obj.b0mask)
                 % Only account for b on the mask in svd.
                 b0mask_a = obj.b0mask;
-                if obj.imSize(3) <= obj.num3DSlc
+                if length(obj.imSize)>2 && (obj.imSize(3) <= obj.num3DSlc)
                     % Account for SMS, where the mask should be identical
                     % for each slice
                     b0mask_a = repmat(max(b0mask_a,[],3), [1 1 obj.imSize(3)]);
