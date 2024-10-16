@@ -50,6 +50,13 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
     else
         A = @(x,transp) Asub(x,transp,Ain);
     end
+
+    % Account for different ways of supplying Rin
+    if isa(Rin,'function_handle')
+        R = Rin;
+    else
+        R = @(x,transp) Asub(x,transp,Rin);
+    end
     
     % Set default starting guess
     if nargin<3 || isempty(x0)
@@ -88,7 +95,7 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         resSqAll(1,1) = residual(:)'*residual(:);
     end
     if nargout > 2
-        l1norm = abs(lam*(Rin*x0));
+        l1norm = abs(lam*(R(x0,'notransp')));
         RxAll(1,1) = gather(sum(l1norm(:)));
     end
     if (nargout > 3) && ~isempty(opt.gtruth)
@@ -121,11 +128,11 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         %   See eq 10
         %   Note that Rin'*Rin = I must be true for this case. This is
         %   true for both the decimated and undecimated wavelet tranform.
-        x = Rin*g;
+        x = R(g,'notransp');
         tmp = abs(lam*x);
         RxAll(nit,2) = gather(sum(tmp(:)));
         x = softthresh(x,lam*stepSz); 
-        x = Rin'*x;
+        x = R(x,'transp');
 
         % Constrain support x-space using projection
         if ~isempty(opt.xMask)
@@ -141,7 +148,7 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
             % Note that Rin'*Rin = I does NOT ensure that Rin*Rin' = I
             % (e.g., undecimated wavelet xform), which is why we have to
             % re-evalue the transform
-            l1norm = abs(lam*(Rin*x));
+            l1norm = abs(lam*(R(x,'notransp')));
             RxAll(nit,1) = gather(sum(l1norm(:)));
         end
         if (nargout > 3) && ~isempty(opt.gtruth)
