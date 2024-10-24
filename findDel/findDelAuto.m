@@ -85,7 +85,7 @@ function [delSk, delSk_perIt] = findDelAuto(delSk0,data_in,tdwell,phs_spha,phs_c
             opFunc = @(x,transp) mrSampFunc(x,transp,S,R);
             % Use the same number of iterations for all recons
             opt_cgne_c.stopOnResInc = 0;
-            [~, resvec] = cgne(opFunc,data_in(:),[],maxNit_cgne,opt_cgne_c); 
+            [~, resvec] = cgne(opFunc,data_in,[],maxNit_cgne,opt_cgne_c); 
             if resvec(end)<resvec_min
                 delSk_min = delSk;
                 resvec_min = resvec(end);
