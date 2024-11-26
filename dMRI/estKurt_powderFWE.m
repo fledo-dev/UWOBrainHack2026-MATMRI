@@ -200,6 +200,8 @@ function [Dtissue,K_lte,K_ste,sigTissue,sigCSF] = estKurt_powderfwe(sigVals_lte,
     % Clip non-physical kurtosis
     K_lte(K_lte > 4) = 4;
     K_ste(K_ste > 4) = 4;
+    K_lte(K_lte < opt.KsteThresh) = opt.KsteThresh;
+    K_ste(K_ste < opt.KsteThresh) = opt.KsteThresh;
 
 end
 
