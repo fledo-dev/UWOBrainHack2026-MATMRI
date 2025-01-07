@@ -63,6 +63,13 @@ if ~isfield(opt,'saveNifti') || isempty(opt.saveNifti)
     % the function is called. 
     opt.saveNifti = true;
 end
+doFWEsupplied = 0;
+if ~isfield(opt,'doFWE') || isempty(opt.doFWE)
+    % Free water elimination on by default
+    opt.doFWE = 1;
+else
+    doFWEsupplied = 1;
+end
 
 % Options for both estD_powderFWE and estKurt_powderFWE
 if ~isfield(opt,'sigTisThresh') || isempty(opt.sigTisThresh)
@@ -201,6 +208,14 @@ fprintf('. STE shells:');
  end   
 fprintf('\n'); 
 
+if (max(length(bshells_lte),length(bshells_ste)) < 4) 
+    if doFWEsupplied && opt.doFWE
+        warning('Too few shells for FWE, but FWE has been requested from inputted options. Expect errors.\n');
+    else
+        fprintf('Too few shells for FWE. Using standard fitting...\n')
+        opt.doFWE = 0;
+    end
+end
 
 %% Perform powder averaging, and extract voxels from mask
 Nmask = sum(int16(mask(:)));
@@ -217,39 +232,62 @@ for n=1:length(bshells_lte)
     signal_LTE(n,:) = im_t(mask);
 end
 
+% Prep output
+szIm = size(im);
+D    = zeros(szIm(1:3),'like',im);
+Kiso = zeros(szIm(1:3),'like',im);
+Klin = zeros(szIm(1:3),'like',im);
+sf   = zeros(szIm(1:3),'like',im);
+uFA  = zeros(szIm(1:3),'like',im);
 
-%% Part 1 of fwe algorithm: fit low b STE to FWE assuming no kurtosis for initial guesses signal fraction 
-% Note: LTE signal with b~0 is also used, since this is virtually identical to STE at such low b.
-signal_DTI = cat(1,signal_LTE(bshells_lte<opt.bthresh,:),signal_STE(bshells_ste<1100,:));
-bDTI = cat(1,bshells_lte(bshells_lte<opt.bthresh),bshells_ste(bshells_ste<1100,:));
-
-if length(bDTI) < 3
-    % Include LTE if there are not enough STE shells
-    signal_DTI = cat(1,signal_LTE(bshells_lte<1100,:),signal_STE(bshells_ste<1100,:));
-    bDTI = cat(1,bshells_lte(bshells_lte<1100),bshells_ste(bshells_ste<1100,:));
+if opt.doFWE
+    %% Part 1 of fwe algorithm: fit low b STE to FWE assuming no kurtosis for initial guesses signal fraction 
+    % Note: LTE signal with b~0 is also used, since this is virtually identical to STE at such low b.
+    signal_DTI = cat(1,signal_LTE(bshells_lte<opt.bthresh,:),signal_STE(bshells_ste<1100,:));
+    bDTI = cat(1,bshells_lte(bshells_lte<opt.bthresh),bshells_ste(bshells_ste<1100,:));
+    
+    if length(bDTI) < 3
+        % Include LTE if there are not enough STE shells
+        signal_DTI = cat(1,signal_LTE(bshells_lte<1100,:),signal_STE(bshells_ste<1100,:));
+        bDTI = cat(1,bshells_lte(bshells_lte<1100),bshells_ste(bshells_ste<1100,:));
+    end
+    if length(bDTI) < 3
+        error('At least 3 b-shells with b<=1000 s/mm2 required for free water elimination (including b0).')
+    end
+    
+    if useGPU
+        signal_DTI = gpuArray(signal_DTI);
+        bDTI = gpuArray(bDTI);
+        signal_LTE = gpuArray(signal_LTE);
+        signal_STE = gpuArray(signal_STE);
+        bshells_lte = gpuArray(bshells_lte);
+        bshells_ste = gpuArray(bshells_ste);
+    end
+    [sigTissue,sigCSF,~] = estD_powderFWE(signal_DTI,bDTI,D_CSF,opt); 
+    
+    
+    %% Fit data to the full FWE-DKI model 
+    % Note that we put the b0 vals into signal_LTE only to avoid repeating them.
+    [D2,Klin2,Kiso2,sigTissue,sigCSF] =...
+        estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),bshells_ste(:),...
+        D_CSF,sigTissue,sigCSF,opt);
+    sf2 = sigTissue./(sigTissue + sigCSF);
+    uFA2 = computeUFA(Klin2,Kiso2);
+    
+    % Save to output
+    if useGPU
+        D2 = gather(D2);
+        Klin2 = gather(Klin2);
+        Kiso2 = gather(Kiso2);
+        sf2 = gather(sf2);
+        uFA2 = gather(uFA2);
+    end
+    D(mask) = D2;
+    Kiso(mask) = Kiso2;
+    Klin(mask) = Klin2;
+    sf(mask) = sf2;
+    uFA(mask) = uFA2;
 end
-if length(bDTI) < 3
-    error('At least 3 b-shells with b<=1000 s/mm2 required for free water elimination (including b0).')
-end
-
-if useGPU
-    signal_DTI = gpuArray(signal_DTI);
-    bDTI = gpuArray(bDTI);
-    signal_LTE = gpuArray(signal_LTE);
-    signal_STE = gpuArray(signal_STE);
-    bshells_lte = gpuArray(bshells_lte);
-    bshells_ste = gpuArray(bshells_ste);
-end
-[sigTissue,sigCSF,~] = estD_powderFWE(signal_DTI,bDTI,D_CSF,opt); 
-
-
-%% Fit data to the full FWE-DKI model 
-% Note that we put the b0 vals into signal_LTE only to avoid repeating them.
-[D2,Klin2,Kiso2,sigTissue,sigCSF] =...
-    estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),bshells_ste(:),...
-    D_CSF,sigTissue,sigCSF,opt);
-sf2 = sigTissue./(sigTissue + sigCSF);
-uFA2 = computeUFA(Klin2,Kiso2);
 
 % Compute uA^22 if the shells support it
 uA2 = [];
@@ -259,69 +297,56 @@ if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste)
     [~,ind_ste] = max(bshells_ste);
     uA22 = log(signal_LTE(ind_lte,:)./signal_STE(ind_ste,:))/mean(bshells_lte(ind_lte),bshells_ste(ind_ste))^2;
     uA22(uA22 < 0) = 0;
-end
-
-if useGPU
-    D2 = gather(D2);
-    Klin2 = gather(Klin2);
-    Kiso2 = gather(Kiso2);
-    sf2 = gather(sf2);
-    uFA2 = gather(uFA2);
-    if ~isempty(uA22)
+    if useGPU
         uA2 = gather(uA2);
     end
-end
-
-% Reshape the output matrices into the same size as the original image volume
-sz = size(im);
-D    = zeros(sz(1:3),'like',im);
-Kiso = zeros(sz(1:3),'like',im);
-Klin = zeros(sz(1:3),'like',im);
-sf   = zeros(sz(1:3),'like',im);
-uFA  = zeros(sz(1:3),'like',im);
-D(mask) = D2;
-Kiso(mask) = Kiso2;
-Klin(mask) = Klin2;
-sf(mask) = sf2;
-uFA(mask) = uFA2;
-if ~isempty(uA22)
-    uA2  = zeros(sz(1:3),'like',im);
+    uA2  = zeros(szIm(1:3),'like',im);
     uA2(mask) = uA22;
 end
 
 %% Compute regular uFA for comparison
-if nargout > 6
+if (nargout > 6) || ~opt.doFWE
     [D2,Klin2,Kiso2] =...
         estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
     uFA2 = computeUFA(Klin2,Kiso2);
 
+    % Prepare output
     if useGPU
         D2 = gather(D2);
         Klin2 = gather(Klin2);
         Kiso2 = gather(Kiso2);
         uFA2 = gather(uFA2);
     end
-
-    % Reshape the output matrices into the same size as the original image volume
-    sz = size(im);
-    D_noFWE    = zeros(sz(1:3),'like',im);
-    Kiso_noFWE = zeros(sz(1:3),'like',im);
-    Klin_noFWE = zeros(sz(1:3),'like',im);
-    uFA_noFWE  = zeros(sz(1:3),'like',im);
-    D_noFWE(mask) = D2;
-    Kiso_noFWE(mask) = Kiso2;
-    Klin_noFWE(mask) = Klin2;
-    uFA_noFWE(mask)  = uFA2;
+    if opt.doFWE
+        D_noFWE    = zeros(szIm(1:3),'like',im);
+        Kiso_noFWE = zeros(szIm(1:3),'like',im);
+        Klin_noFWE = zeros(szIm(1:3),'like',im);
+        uFA_noFWE  = zeros(szIm(1:3),'like',im);
+        D_noFWE(mask) = D2;
+        Kiso_noFWE(mask) = Kiso2;
+        Klin_noFWE(mask) = Klin2;
+        uFA_noFWE(mask)  = uFA2;
+    else
+        D_noFWE = [];
+        Kiso_noFWE = [];
+        Klin_noFWE = [];
+        uFA_noFWE = [];
+        D(mask) = D2;
+        Kiso(mask) = Kiso2;
+        Klin(mask) = Klin2;
+        uFA(mask) = uFA2;
+        sf(:) = 1;
+    end
 end
 
 % Reformat dims of signal vectors
-tmp = zeros(sz(1:3),'like',im);
-sLTE = zeros([sz(1:3), size(signal_LTE,1)],'like',im);
+tmp = zeros(szIm(1:3),'like',im);
+sLTE = zeros([szIm(1:3), size(signal_LTE,1)],'like',im);
 for n=1:size(signal_LTE,1)
     tmp(mask) = signal_LTE(n,:);
     sLTE(:,:,:,n) = tmp;
 end
-sSTE = zeros([sz(1:3), size(signal_STE,1)],'like',im);
+sSTE = zeros([szIm(1:3), size(signal_STE,1)],'like',im);
 for n=1:size(signal_STE,1)
     tmp(mask) = signal_STE(n,:);
     sSTE(:,:,:,n) = tmp;
@@ -360,7 +385,7 @@ if opt.saveNifti && ischar(file)
     if ~isempty(uA2)
         niftiwrite(single(uA2), sprintf('%s_uA2', savename), im_info, 'Compressed', true);
     end
-    if nargout > 6
+    if ~isempty(D_noFWE)
         niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
