@@ -43,6 +43,10 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         % whether to enforce bounded x-space support
         opt.xMask = []; 
     end
+    if nargin<7 || ~isfield(opt,'kMask')
+        % whether to enforce bounded k-space support
+        opt.kMask = []; 
+    end
     
     % Account for different ways of supplying A
     if isa(Ain,'function_handle')
@@ -137,6 +141,25 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         % Constrain support x-space using projection
         if ~isempty(opt.xMask)
             x = x.*opt.xMask;
+        end
+
+        % Constrain support k-space using projection. Note that the
+        % supplied mask should be fftshifted. 
+        %   This can help to control noise amplification, since samples
+        %   outside the k-space support (e.g., corners of k-space when a
+        %   spherical sampling pattern is used) are poorly conditioned.
+        %   Still not sure if this is beneficial (CB), since wavelet
+        %   regularization controls noise amplification anyway. When I've
+        %   tried this in combination with wavelet, image looks comparable
+        %   but ringing is worsened due to the sharp edges in k-space introduced.
+        if ~isempty(opt.kMask)
+            if (ndims(opt.kMask)==2) && (size(opt.kMask,2)>1)
+                x = fftnc(x,2,0,0);
+                x = x.*opt.kMask;
+                x = ifftnc(x,2,0,0);
+            else
+                error('TODO: code for other dims, or require an fftFunc supplied to bfista')
+            end
         end
         
         % Update tracking
