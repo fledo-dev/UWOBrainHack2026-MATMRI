@@ -1,4 +1,4 @@
-function dwi = nii2meandwi(name,name_bval,savename,bthresh)
+function [dwi, labels, bvals] = nii2meandwi(name,name_bval,savename,bthresh)
 % Loads in a dwi scan, and outputs a mean dwi at each b-value. Include file
 % extensions in names.
 %    name_bval: name of bval file or bmat file. If bmat file is provided,
@@ -61,19 +61,9 @@ for n=1:length(bval)
 end
 % disp(blist);
 
-%  Create dwi's
-im_info = niftiinfo(name);
-im_info.PixelDimensions = im_info.PixelDimensions(1:3);
-im_info.ImageSize = im_info.ImageSize(1:3);
-im_info.raw.dim(1) = 3;
-im_info.raw.dim(5) = 1;
-im_info.raw.pixdim(5) = 0;
-im_info.raw.dim_info = ' ';
-%
-im_info.Datatype = 'single';
-im_info.BitsPerPixel = 32;
-im_info.raw.datatype = 16;
-im_info.raw.bitpix = 32;
+% Create dwi's
+dwi = cell(length(brankList),length(blist));
+labels = cell(length(brankList));
 for m=1:length(brankList)
     switch brankList(m)
         case 0
@@ -88,8 +78,43 @@ for m=1:length(brankList)
     for n=1:length(blist)
         inds = and(brank==brankList(m), abs(bval-blist(n))<bthresh);
         if any(inds)
-            dwi = mean(im(:,:,:,inds),4);
-            niftiwrite(dwi, sprintf('%s_%s_b%d', savename, txt, round(blist(n))), im_info, 'Compressed', doCompress);
+            dwi{m,n} = mean(im(:,:,:,inds),4);
+            labels{m} = txt;
+            bvals(n) = blist(n);
+        end
+    end
+end
+
+% Save dwi's
+if savename ~= 0
+    im_info = niftiinfo(name);
+    im_info.PixelDimensions = im_info.PixelDimensions(1:3);
+    im_info.ImageSize = im_info.ImageSize(1:3);
+    im_info.raw.dim(1) = 3;
+    im_info.raw.dim(5) = 1;
+    im_info.raw.pixdim(5) = 0;
+    im_info.raw.dim_info = ' ';
+    %
+    im_info.Datatype = 'single';
+    im_info.BitsPerPixel = 32;
+    im_info.raw.datatype = 16;
+    im_info.raw.bitpix = 32;
+    for m=1:length(brankList)
+        switch brankList(m)
+            case 0
+                txt = 'dwi';
+            case 1 
+                txt = 'lte';
+            case 2
+                txt = 'pte';
+            case 3
+                txt = 'ste';
+        end
+        for n=1:length(blist)
+            inds = and(brank==brankList(m), abs(bval-blist(n))<bthresh);
+            if any(inds)
+                niftiwrite(dwi{m,n}, sprintf('%s_%s_b%d', savename, txt, round(blist(n))), im_info, 'Compressed', doCompress);
+            end
         end
     end
 end
