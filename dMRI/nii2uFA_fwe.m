@@ -56,9 +56,9 @@ if ~isfield(opt,'D_CSF')
     D_CSF = 3e-3;
 end
 
-if ~isfield(opt,'noGPU') || isempty(opt.noGPU)
+if ~isfield(opt,'noGPU') || isempty(opt.GPU)
     % Disable automatic usage of GPU
-    opt.noGPU = 0;
+    opt.GPU = 1;
 end
 if ~isfield(opt,'saveNifti') || isempty(opt.saveNifti)
     % Save nifti outputs. Nifti's for parameters computed without the
@@ -110,7 +110,7 @@ end
 
 % Check for gpu support
 useGPU = 0;
-if gpuDeviceCount >= 1 && ~opt.noGPU
+if gpuDeviceCount >= 1 && opt.noGPU
     if opt.verbose
         fprintf('Using GPU...\n')
     end
