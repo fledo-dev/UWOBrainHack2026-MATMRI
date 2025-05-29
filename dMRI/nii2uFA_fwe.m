@@ -1,4 +1,4 @@
-function [uFA,Kiso,Klin,D,sf,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt, savename)
+function [uFA,Kiso,Klin,D,sf,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -39,18 +39,20 @@ tic_a = tic;
 if nargin < 4
     maskfile = [];
 end
-if (nargin < 5) || isempty(D_CSF)
-    D_CSF = 3e-3;
-end
 
 % Options used by uFA_fwe
-if nargin<6 || ~isfield(opt,'bthresh') || isempty(opt.bthresh)
+if nargin<5 || ~isfield(opt,'bthresh') || isempty(opt.bthresh)
     % Threshold for difference between b-shells
     opt.bthresh = 50;
 end
 
-if nargin<7
+if nargin<6
     savename = [];
+end
+
+% Important: Default MD for CSF to 3 (mm2/s)
+if ~isfield(opt,'D_CSF')
+    D_CSF = 3e-3;
 end
 
 if ~isfield(opt,'noGPU') || isempty(opt.noGPU)
