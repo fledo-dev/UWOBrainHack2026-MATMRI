@@ -1,5 +1,4 @@
 function [uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
-%function [uFA,Kiso,Klin,D,sf,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -16,10 +15,10 @@ function [uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2, uFA_noFWE,Klin_noFWE,Kiso_
 %                           Bxx Byy Bzz Bxy Bxz Byz
 %                             or
 %                           Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
-%   D_CSF:      (optional) presumed ADC for CSF (mm2/s). default = 3e-3 
 %   maskfile:   (optional) path to NIFTI file containing a binary mask
 %   opt:        (optional) structure that contains options for algorithm.
 %                   See comments where defaults are set in code for info.
+%   opt.D_CSF:  (optional) presumed ADC for CSF (mm2/s). default = 3e-3 
 %   savename:   (optional) filename for output nifti. Exclude extension.
 %                It can be the fullpath+filename for a different output directory.
 %
@@ -237,35 +236,33 @@ for n=1:length(bshells_lte)
     signal_LTE(n,:) = im_t(mask);
 end
 
-% Prep output
+%% Prep output
 szIm = size(im);
-
-% ToDo only get this memory if FWE/nonFWE is requested
-D_FWE    = zeros(szIm(1:3),'like',im);
-Kiso_FWE = zeros(szIm(1:3),'like',im);
-Klin_FWE = zeros(szIm(1:3),'like',im);
-sf_FWE   = zeros(szIm(1:3),'like',im);
-uFA_FWE  = zeros(szIm(1:3),'like',im);
-
 
 D_noFWE    = zeros(szIm(1:3),'like',im);
 Kiso_noFWE = zeros(szIm(1:3),'like',im);
 Klin_noFWE = zeros(szIm(1:3),'like',im);
 uFA_noFWE  = zeros(szIm(1:3),'like',im);
 
+if opt.doFWE
+    D_FWE    = zeros(szIm(1:3),'like',im);
+    Kiso_FWE = zeros(szIm(1:3),'like',im);
+    Klin_FWE = zeros(szIm(1:3),'like',im);
+    sf_FWE   = zeros(szIm(1:3),'like',im);
+    uFA_FWE  = zeros(szIm(1:3),'like',im);
+end
+
 %% Compute regular uFA
  [D2,Klin2,Kiso2] =...
      estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
  uFA2 = computeUFA(Klin2,Kiso2); % TODO. Add code for function here?
 
- % Prepare output
  if useGPU
      D2 = gather(D2);
      Klin2 = gather(Klin2);
      Kiso2 = gather(Kiso2);
      uFA2 = gather(uFA2);
- end
- 
+ end 
  D_noFWE(mask) = D2;
  Kiso_noFWE(mask) = Kiso2;
  Klin_noFWE(mask) = Klin2;
@@ -321,7 +318,7 @@ if opt.doFWE
     uFA_FWE(mask) = uFA2;
 end
 
-% Compute uA^22 if the shells support it
+%% Compute uA^22 if the shells support it
 uA2 = [];
 uA22 = [];
 if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste))) < 0.05
@@ -336,7 +333,7 @@ if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste)
     uA2(mask) = uA22;
 end
 
-% Reformat dims of signal vectors
+%% Reformat dims of signal vectors
 tmp = zeros(szIm(1:3),'like',im);
 sLTE = zeros([szIm(1:3), size(signal_LTE,1)],'like',im);
 for n=1:size(signal_LTE,1)
@@ -350,7 +347,7 @@ for n=1:size(signal_STE,1)
 end
 clear tmp
 
-% Create NIFTI files. Inherit header information from input NIFTI
+%% Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti && ischar(file)
     im_info = niftiinfo(file);
     im_info.PixelDimensions = im_info.PixelDimensions(1:3);
@@ -374,13 +371,12 @@ if opt.saveNifti && ischar(file)
         % savename = [fpath,filesep,savename]; % put path back on
     end
 
-    % normal uFA calculation always happens
     niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
     niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
     niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
     niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
 
-    if opt.doFWE  % TODO Add flag taht indicates to save FWE if they were calculated
+    if opt.doFWE 
         niftiwrite(single(D_FWE), sprintf('%s_D_FWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(uFA_FWE), sprintf('%s_uFA_FWE', savename), im_info, 'Compressed', true);
         niftiwrite(single(Kiso_FWE), sprintf('%s_Kiso_FWE', savename), im_info, 'Compressed', true);
@@ -416,6 +412,7 @@ fprintf('Total computation time: %.1f min\n', toc(tic_a)/60);
 
 end
 
+%% Aux functions
 function uFA = computeUFA(Klin,Kiso)
     u2 = 1/3*(Klin-Kiso);
     u2(u2<0) = 0; % negative anisotropy is non-physical
