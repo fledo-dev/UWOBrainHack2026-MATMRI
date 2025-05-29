@@ -145,6 +145,8 @@ if ischar(isIso)
         if any(brank==2)
             error('Planar encoding detected, but fitting model does not account for this');
         end
+    else
+        isIso = bmat;
     end
 end
 if isempty(maskfile)
