@@ -1,4 +1,4 @@
-function [uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
+function [uFA,Klin,Kiso,D,uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -23,12 +23,13 @@ function [uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2, uFA_noFWE,Klin_noFWE,Kiso_
 %                It can be the fullpath+filename for a different output directory.
 %
 %   OUTPUTS
-%   uFA:        FWE corrected microscopic fractional anisotropy
+%   uFA:        Microscopic fractional anisotropy
 %   Klin:       total kurtosis (i.e., from linear tensor encoding)
 %   Kiso:       isotropic kurtosis (i.e., from spherical tensor encoding)
 %   D:          apparent diffusion coefficient 
-%   sf:         fraction of tissue signal
-%   *_noFWE:        same descriptions as above, but without FWE model
+%   (optional outputs)
+%   *_FWE:      same descriptions as above, corrected for free water elimination
+%   sf_FWE:     fraction of tissue signal for FWE model
 %
 %   (c) 2022, Nico Arezza and Corey Baron
 
@@ -239,10 +240,10 @@ end
 %% Prep output
 szIm = size(im);
 
-D_noFWE    = zeros(szIm(1:3),'like',im);
-Kiso_noFWE = zeros(szIm(1:3),'like',im);
-Klin_noFWE = zeros(szIm(1:3),'like',im);
-uFA_noFWE  = zeros(szIm(1:3),'like',im);
+D    = zeros(szIm(1:3),'like',im);
+Kiso = zeros(szIm(1:3),'like',im);
+Klin = zeros(szIm(1:3),'like',im);
+uFA  = zeros(szIm(1:3),'like',im);
 
 if opt.doFWE
     D_FWE    = zeros(szIm(1:3),'like',im);
@@ -263,10 +264,10 @@ end
      Kiso2 = gather(Kiso2);
      uFA2 = gather(uFA2);
  end 
- D_noFWE(mask) = D2;
- Kiso_noFWE(mask) = Kiso2;
- Klin_noFWE(mask) = Klin2;
- uFA_noFWE(mask)  = uFA2;
+ D(mask) = D2;
+ Kiso(mask) = Kiso2;
+ Klin(mask) = Klin2;
+ uFA(mask)  = uFA2;
 
 %% FWE calculation
 if opt.doFWE
@@ -371,10 +372,10 @@ if opt.saveNifti && ischar(file)
         % savename = [fpath,filesep,savename]; % put path back on
     end
 
-    niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
+    niftiwrite(single(D), sprintf('%s_D', savename), im_info, 'Compressed', true);
+    niftiwrite(single(uFA), sprintf('%s_uFA', savename), im_info, 'Compressed', true);
+    niftiwrite(single(Kiso), sprintf('%s_Kiso', savename), im_info, 'Compressed', true);
+    niftiwrite(single(Klin), sprintf('%s_Klin', savename), im_info, 'Compressed', true);
 
     if opt.doFWE 
         niftiwrite(single(D_FWE), sprintf('%s_D_FWE', savename), im_info, 'Compressed', true);
