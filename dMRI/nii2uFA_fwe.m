@@ -254,37 +254,22 @@ Klin_noFWE = zeros(szIm(1:3),'like',im);
 uFA_noFWE  = zeros(szIm(1:3),'like',im);
 
 %% Compute regular uFA
-if ~opt.doFWE % TODO. Should we add another flag to avoid this? do we need it?
-    % TODO I beleive thsi case only makes sense if you are only doing uFA
-    % alone (which we will assume always gets calculated)
-    [D2,Klin2,Kiso2] =...
-        estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
-    uFA2 = computeUFA(Klin2,Kiso2);
+ [D2,Klin2,Kiso2] =...
+     estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
+ uFA2 = computeUFA(Klin2,Kiso2); % TODO. Add code for function here?
 
-    % Prepare output
-    if useGPU
-        D2 = gather(D2);
-        Klin2 = gather(Klin2);
-        Kiso2 = gather(Kiso2);
-        uFA2 = gather(uFA2);
-    end
-    if opt.doFWE  
-        D_noFWE(mask) = D2;
-        Kiso_noFWE(mask) = Kiso2;
-        Klin_noFWE(mask) = Klin2;
-        uFA_noFWE(mask)  = uFA2;
-    else % TODO I feel thsi will be unnecesary if we differentiante with FWE the second ones
-        D_noFWE = [];
-        Kiso_noFWE = [];
-        Klin_noFWE = [];
-        uFA_noFWE = [];
-        D(mask) = D2;
-        Kiso(mask) = Kiso2;
-        Klin(mask) = Klin2;
-        uFA(mask) = uFA2;
-        sf(:) = 1;
-    end
-end
+ % Prepare output
+ if useGPU
+     D2 = gather(D2);
+     Klin2 = gather(Klin2);
+     Kiso2 = gather(Kiso2);
+     uFA2 = gather(uFA2);
+ end
+ 
+ D_noFWE(mask) = D2;
+ Kiso_noFWE(mask) = Kiso2;
+ Klin_noFWE(mask) = Klin2;
+ uFA_noFWE(mask)  = uFA2;
 
 %% FWE calculation
 if opt.doFWE
@@ -389,20 +374,21 @@ if opt.saveNifti && ischar(file)
         % savename = [fpath,filesep,savename]; % put path back on
     end
 
-    % TODO Add flag taht indicates to save FWE if they were calculated
-    niftiwrite(single(D_FWE), sprintf('%s_D_FWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(uFA_FWE), sprintf('%s_uFA_FWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(Kiso_FWE), sprintf('%s_Kiso_FWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(Klin_FWE), sprintf('%s_Klin_FWE', savename), im_info, 'Compressed', true);
-    niftiwrite(single(sf), sprintf('%s_sigFrac_FWE', savename), im_info, 'Compressed', true);
+    % normal uFA calculation always happens
+    niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
+    niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
+    niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
+    niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
+
+    if opt.doFWE  % TODO Add flag taht indicates to save FWE if they were calculated
+        niftiwrite(single(D_FWE), sprintf('%s_D_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(uFA_FWE), sprintf('%s_uFA_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(Kiso_FWE), sprintf('%s_Kiso_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(Klin_FWE), sprintf('%s_Klin_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(sf_FWE), sprintf('%s_sigFrac_FWE', savename), im_info, 'Compressed', true);
+    end
     if ~isempty(uA2)
         niftiwrite(single(uA2), sprintf('%s_uA2', savename), im_info, 'Compressed', true);
-    end
-    if ~isempty(D_noFWE) % TODO. probably need to change the logic here. This must always happen
-        niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
-        niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
-        niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
-        niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
     end
     %TODO: write out FA (have code for tensor now)
     im_info0 = im_info;
