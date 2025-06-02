@@ -1,4 +1,4 @@
-function [uFA,Kiso,Klin,D,sf,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, D_CSF, opt, savename)
+function [uFA,Klin,Kiso,D,uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -15,20 +15,22 @@ function [uFA,Kiso,Klin,D,sf,uA2, uFA_noFWE,Klin_noFWE,Kiso_noFWE,D_noFWE,sSTE,s
 %                           Bxx Byy Bzz Bxy Bxz Byz
 %                             or
 %                           Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
-%   D_CSF:      (optional) presumed ADC for CSF (mm2/s). default = 3e-3 
 %   maskfile:   (optional) path to NIFTI file containing a binary mask
 %   opt:        (optional) structure that contains options for algorithm.
-%                   See comments where defaults are set in code for info.
+%                   See comments where defaults are set in code for full info.
+%   opt.doFWE   (optional) turn on/off FWE. Default On is data shell support it
+%   opt.D_CSF:  (optional) presumed ADC for CSF (um2/ms). Default = 3 
 %   savename:   (optional) filename for output nifti. Exclude extension.
 %                It can be the fullpath+filename for a different output directory.
 %
 %   OUTPUTS
-%   uFA:        FWE corrected microscopic fractional anisotropy
+%   uFA:        Microscopic fractional anisotropy
 %   Klin:       total kurtosis (i.e., from linear tensor encoding)
 %   Kiso:       isotropic kurtosis (i.e., from spherical tensor encoding)
 %   D:          apparent diffusion coefficient 
-%   sf:         fraction of tissue signal
-%   *_noFWE:        same descriptions as above, but without FWE model
+%   (optional outputs)
+%   *_FWE:      same descriptions as above, corrected for free water elimination
+%   sf_FWE:     fraction of tissue signal for FWE model
 %
 %   (c) 2022, Nico Arezza and Corey Baron
 
@@ -39,23 +41,28 @@ tic_a = tic;
 if nargin < 4
     maskfile = [];
 end
-if (nargin < 5) || isempty(D_CSF)
-    D_CSF = 3e-3;
-end
 
 % Options used by uFA_fwe
-if nargin<6 || ~isfield(opt,'bthresh') || isempty(opt.bthresh)
+if nargin<5 || ~isfield(opt,'bthresh') || isempty(opt.bthresh)
     % Threshold for difference between b-shells
     opt.bthresh = 50;
 end
 
-if nargin<7
+if nargin<6
     savename = [];
 end
 
-if ~isfield(opt,'noGPU') || isempty(opt.noGPU)
+% Important: Default MD for CSF to 3 (um2/ms)
+% changing units as algorithms work with mm2/s
+if ~isfield(opt,'D_CSF')
+    D_CSF = 3e-3;
+else
+    D_CSF = opt.D_CSF*1e-3; 
+end
+
+if ~isfield(opt,'GPU') || isempty(opt.GPU)
     % Disable automatic usage of GPU
-    opt.noGPU = 0;
+    opt.GPU = 1;
 end
 if ~isfield(opt,'saveNifti') || isempty(opt.saveNifti)
     % Save nifti outputs. Nifti's for parameters computed without the
@@ -90,6 +97,8 @@ end
 if ~isfield(opt,'Dtissue0') || isempty(opt.Dtissue0)
     % Starting guess for tissue ADC (mm2/s)
     opt.Dtissue0 = 0.7e-3;
+else
+    opt.Dtissue0 = opt.Dtissue0*1e-3; 
 end
 
 % Options for estKurt_powderFWE
@@ -107,7 +116,7 @@ end
 
 % Check for gpu support
 useGPU = 0;
-if gpuDeviceCount >= 1 && ~opt.noGPU
+if gpuDeviceCount >= 1 && opt.GPU
     if opt.verbose
         fprintf('Using GPU...\n')
     end
@@ -234,14 +243,39 @@ for n=1:length(bshells_lte)
     signal_LTE(n,:) = im_t(mask);
 end
 
-% Prep output
+%% Prep output
 szIm = size(im);
+
 D    = zeros(szIm(1:3),'like',im);
 Kiso = zeros(szIm(1:3),'like',im);
 Klin = zeros(szIm(1:3),'like',im);
-sf   = zeros(szIm(1:3),'like',im);
 uFA  = zeros(szIm(1:3),'like',im);
 
+if opt.doFWE
+    D_FWE    = zeros(szIm(1:3),'like',im);
+    Kiso_FWE = zeros(szIm(1:3),'like',im);
+    Klin_FWE = zeros(szIm(1:3),'like',im);
+    sf_FWE   = zeros(szIm(1:3),'like',im);
+    uFA_FWE  = zeros(szIm(1:3),'like',im);
+end
+
+%% Compute regular uFA
+ [D2,Klin2,Kiso2] =...
+     estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
+ uFA2 = computeUFA(Klin2,Kiso2); % TODO. Add code for function here?
+
+ if useGPU
+     D2 = gather(D2);
+     Klin2 = gather(Klin2);
+     Kiso2 = gather(Kiso2);
+     uFA2 = gather(uFA2);
+ end 
+ D(mask) = D2*1e3; % Saving in units um2/ms;
+ Kiso(mask) = Kiso2;
+ Klin(mask) = Klin2;
+ uFA(mask)  = uFA2;
+
+%% FWE calculation
 if opt.doFWE
     %% Part 1 of fwe algorithm: fit low b STE to FWE assuming no kurtosis for initial guesses signal fraction 
     % Note: LTE signal with b~0 is also used, since this is virtually identical to STE at such low b.
@@ -274,7 +308,7 @@ if opt.doFWE
         estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),bshells_ste(:),...
         D_CSF,sigTissue,sigCSF,opt);
     sf2 = sigTissue./(sigTissue + sigCSF);
-    uFA2 = computeUFA(Klin2,Kiso2);
+    uFA2 = computeUFA(Klin2,Kiso2); % Maybe just add the code of the function directly here
     
     % Save to output
     if useGPU
@@ -284,14 +318,21 @@ if opt.doFWE
         sf2 = gather(sf2);
         uFA2 = gather(uFA2);
     end
-    D(mask) = D2;
-    Kiso(mask) = Kiso2;
-    Klin(mask) = Klin2;
-    sf(mask) = sf2;
-    uFA(mask) = uFA2;
+    D_FWE(mask) = D2*1e3; % Saving in units um2/ms
+    Kiso_FWE(mask) = Kiso2;
+    Klin_FWE(mask) = Klin2;
+    sf_FWE(mask) = sf2;
+    uFA_FWE(mask) = uFA2;
+
+else % Saving empty outputs in case no FWE was done
+    D_FWE = []; 
+    Kiso_FWE = [];
+    Klin_FWE = [];
+    sf_FWE = [];
+    uFA_FWE = [];   
 end
 
-% Compute uA^22 if the shells support it
+%% Compute uA^22 if the shells support it
 uA2 = [];
 uA22 = [];
 if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste))) < 0.05
@@ -306,42 +347,7 @@ if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste)
     uA2(mask) = uA22;
 end
 
-%% Compute regular uFA for comparison
-if (nargout > 6) || ~opt.doFWE
-    [D2,Klin2,Kiso2] =...
-        estKurt_powderFWE(signal_LTE,signal_STE,bshells_lte(:),reshape(bshells_ste(:),[],1));
-    uFA2 = computeUFA(Klin2,Kiso2);
-
-    % Prepare output
-    if useGPU
-        D2 = gather(D2);
-        Klin2 = gather(Klin2);
-        Kiso2 = gather(Kiso2);
-        uFA2 = gather(uFA2);
-    end
-    if opt.doFWE
-        D_noFWE    = zeros(szIm(1:3),'like',im);
-        Kiso_noFWE = zeros(szIm(1:3),'like',im);
-        Klin_noFWE = zeros(szIm(1:3),'like',im);
-        uFA_noFWE  = zeros(szIm(1:3),'like',im);
-        D_noFWE(mask) = D2;
-        Kiso_noFWE(mask) = Kiso2;
-        Klin_noFWE(mask) = Klin2;
-        uFA_noFWE(mask)  = uFA2;
-    else
-        D_noFWE = [];
-        Kiso_noFWE = [];
-        Klin_noFWE = [];
-        uFA_noFWE = [];
-        D(mask) = D2;
-        Kiso(mask) = Kiso2;
-        Klin(mask) = Klin2;
-        uFA(mask) = uFA2;
-        sf(:) = 1;
-    end
-end
-
-% Reformat dims of signal vectors
+%% Reformat dims of signal vectors
 tmp = zeros(szIm(1:3),'like',im);
 sLTE = zeros([szIm(1:3), size(signal_LTE,1)],'like',im);
 for n=1:size(signal_LTE,1)
@@ -355,7 +361,7 @@ for n=1:size(signal_STE,1)
 end
 clear tmp
 
-% Create NIFTI files. Inherit header information from input NIFTI
+%% Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti && ischar(file)
     im_info = niftiinfo(file);
     im_info.PixelDimensions = im_info.PixelDimensions(1:3);
@@ -383,15 +389,16 @@ if opt.saveNifti && ischar(file)
     niftiwrite(single(uFA), sprintf('%s_uFA', savename), im_info, 'Compressed', true);
     niftiwrite(single(Kiso), sprintf('%s_Kiso', savename), im_info, 'Compressed', true);
     niftiwrite(single(Klin), sprintf('%s_Klin', savename), im_info, 'Compressed', true);
-    niftiwrite(single(sf), sprintf('%s_sigFrac', savename), im_info, 'Compressed', true);
+
+    if opt.doFWE 
+        niftiwrite(single(D_FWE), sprintf('%s_D_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(uFA_FWE), sprintf('%s_uFA_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(Kiso_FWE), sprintf('%s_Kiso_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(Klin_FWE), sprintf('%s_Klin_FWE', savename), im_info, 'Compressed', true);
+        niftiwrite(single(sf_FWE), sprintf('%s_sigFrac_FWE', savename), im_info, 'Compressed', true);
+    end
     if ~isempty(uA2)
         niftiwrite(single(uA2), sprintf('%s_uA2', savename), im_info, 'Compressed', true);
-    end
-    if ~isempty(D_noFWE)
-        niftiwrite(single(D_noFWE), sprintf('%s_D_noFWE', savename), im_info, 'Compressed', true);
-        niftiwrite(single(uFA_noFWE), sprintf('%s_uFA_noFWE', savename), im_info, 'Compressed', true);
-        niftiwrite(single(Kiso_noFWE), sprintf('%s_Kiso_noFWE', savename), im_info, 'Compressed', true);
-        niftiwrite(single(Klin_noFWE), sprintf('%s_Klin_noFWE', savename), im_info, 'Compressed', true);
     end
     %TODO: write out FA (have code for tensor now)
     im_info0 = im_info;
@@ -419,6 +426,7 @@ fprintf('Total computation time: %.1f min\n', toc(tic_a)/60);
 
 end
 
+%% Aux functions
 function uFA = computeUFA(Klin,Kiso)
     u2 = 1/3*(Klin-Kiso);
     u2(u2<0) = 0; % negative anisotropy is non-physical
@@ -426,6 +434,3 @@ function uFA = computeUFA(Klin,Kiso)
     uFA = abs(uFA);
     uFA(uFA>sqrt(1.5))=sqrt(1.5);
 end
-
-
-
