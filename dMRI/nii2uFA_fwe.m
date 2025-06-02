@@ -264,7 +264,7 @@ end
      Kiso2 = gather(Kiso2);
      uFA2 = gather(uFA2);
  end 
- D(mask) = D2;
+ D(mask) = D2*1e3; % Saving in units um2/ms;
  Kiso(mask) = Kiso2;
  Klin(mask) = Klin2;
  uFA(mask)  = uFA2;
@@ -312,7 +312,7 @@ if opt.doFWE
         sf2 = gather(sf2);
         uFA2 = gather(uFA2);
     end
-    D_FWE(mask) = D2;
+    D_FWE(mask) = D2*1e3; % Saving in units um2/ms
     Kiso_FWE(mask) = Kiso2;
     Klin_FWE(mask) = Klin2;
     sf_FWE(mask) = sf2;
