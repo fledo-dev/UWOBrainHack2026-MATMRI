@@ -69,9 +69,9 @@ if nargin<5 || ~isfield(opt,'fthresh') || isempty(opt.fthresh)
     % Threshold for difference between OGSE frequency  shells
     opt.fthresh = 5;
 end
-if ~isfield(opt,'noGPU') || isempty(opt.noGPU)
+if ~isfield(opt,'GPU') || isempty(opt.GPU)
     % Disable automatic usage of GPU
-    opt.noGPU = 0;
+    opt.GPU = 1;
 end
 if ~isfield(opt,'saveNifti') || isempty(opt.saveNifti)
     % Save nifti outputs. 
@@ -106,7 +106,7 @@ tic1 = tic;
 
 % Check for gpu support
 useGPU = 0;
-if gpuDeviceCount >= 1 && ~opt.noGPU
+if gpuDeviceCount >= 1 && opt.GPU
     if opt.verbose
         fprintf('  Using GPU...\n')
     end
@@ -167,7 +167,7 @@ mask = and(mask, sum(abs(im),4) > 2*eps);
 im(im==0) = eps;
 
 % Move to GPU
-if ~opt.noGPU
+if useGPU
     bval = gpuArray(bval);
     bvec = gpuArray(bvec);
 end
@@ -214,7 +214,7 @@ DT = reshape(DT,[3 3 size(DT,2)]);
 
 % Compute eigenvalues and eigenvectors. Using svd because pagefun does not
 % support eig. Also, svd conveniently sorts the singular values
-if ~isMATLABReleaseOlderThan('R2022b') && ~opt.noGPU
+if ~isMATLABReleaseOlderThan('R2022b') && opt.GPU
     vec = zeros(size(DT),'like',DT);
     eigvals = zeros(size(DT),'like',DT);
     [vec(:,:,mask), eigvals(:,:,mask)] = pagefun(@svd,DT(:,:,mask)); 
