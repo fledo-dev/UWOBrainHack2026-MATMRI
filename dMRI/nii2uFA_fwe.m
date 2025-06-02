@@ -17,8 +17,9 @@ function [uFA,Klin,Kiso,D,uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2,sSTE,sLTE] 
 %                           Bxx Bxy Bxz Bxy Byy Byz Bxz Byz Bzz
 %   maskfile:   (optional) path to NIFTI file containing a binary mask
 %   opt:        (optional) structure that contains options for algorithm.
-%                   See comments where defaults are set in code for info.
-%   opt.D_CSF:  (optional) presumed ADC for CSF (mm2/s). default = 3e-3 
+%                   See comments where defaults are set in code for full info.
+%   opt.doFWE   (optional) turn on/off FWE. Default On is data shell support it
+%   opt.D_CSF:  (optional) presumed ADC for CSF (um2/ms). Default = 3 
 %   savename:   (optional) filename for output nifti. Exclude extension.
 %                It can be the fullpath+filename for a different output directory.
 %
@@ -51,9 +52,12 @@ if nargin<6
     savename = [];
 end
 
-% Important: Default MD for CSF to 3 (mm2/s)
+% Important: Default MD for CSF to 3 (um2/ms)
+% changing units as algorithms work with mm2/s
 if ~isfield(opt,'D_CSF')
     D_CSF = 3e-3;
+else
+    D_CSF = opt.D_CSF*1e-3; 
 end
 
 if ~isfield(opt,'GPU') || isempty(opt.GPU)
@@ -93,6 +97,8 @@ end
 if ~isfield(opt,'Dtissue0') || isempty(opt.Dtissue0)
     % Starting guess for tissue ADC (mm2/s)
     opt.Dtissue0 = 0.7e-3;
+else
+    opt.Dtissue0 = opt.Dtissue0*1e-3; 
 end
 
 % Options for estKurt_powderFWE
