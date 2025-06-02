@@ -317,6 +317,13 @@ if opt.doFWE
     Klin_FWE(mask) = Klin2;
     sf_FWE(mask) = sf2;
     uFA_FWE(mask) = uFA2;
+
+else % Saving empty outputs in case no FWE was done
+    D_FWE = []; 
+    Kiso_FWE = [];
+    Klin_FWE = [];
+    sf_FWE = [];
+    uFA_FWE = [];   
 end
 
 %% Compute uA^22 if the shells support it
