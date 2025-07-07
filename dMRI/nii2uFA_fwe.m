@@ -338,7 +338,7 @@ uA22 = [];
 if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste))) < 0.05
     [~,ind_lte] = max(bshells_lte);
     [~,ind_ste] = max(bshells_ste);
-    uA22 = log(signal_LTE(ind_lte,:)./signal_STE(ind_ste,:))/mean(bshells_lte(ind_lte),bshells_ste(ind_ste))^2;
+    uA22 = log(signal_LTE(ind_lte,:)./signal_STE(ind_ste,:))/mean([bshells_lte(ind_lte),bshells_ste(ind_ste)])^2;
     uA22(uA22 < 0) = 0;
     if useGPU
         uA2 = gather(uA2);
