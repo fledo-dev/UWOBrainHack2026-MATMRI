@@ -62,6 +62,11 @@ if ~isfield(opt,'compMat') || isempty(opt.compMat)
     % Compression matrix for basis fcn compression
     opt.compMat = [];
 end
+if ~isfield(opt,'uncompress') || isempty(opt.uncompress) 
+    % Whether to automatically uncompress after computing compressed basis
+    % fcns with opt.compmat
+    opt.uncompress = 1;
+end
 coilParams = opt.coilParams;
 fitOrder = opt.fitOrder;
 
@@ -286,29 +291,8 @@ end
 %figure; plot(resid)
 
 % Uncompress basis functions.
-if ~isempty(opt.compMat)
-    phs_spha = permute(phs_spha,[2 1 3:6]);
-    sz_a = size(phs_spha);
-    compMatInv = pinv(opt.compMat);
-    % Scale to SI units (compMat uses units of dm)
-    compMatInv(1:5,:) = 10^2*compMatInv(1:5,:); % 2nd order
-    if size(compMatInv,1) > 5
-        compMatInv(6:12,:) = 10^3*compMatInv(6:12,:); % 3nd order
-    end
-    if size(compMatInv,1) > 12
-        compMatInv(13:21,:) = 10^4*compMatInv(13:21,:); % 4th order
-    end
-    if size(compMatInv,1) > 21
-        compMatInv(22:32,:) = 10^5*compMatInv(22:32,:); % 5th order
-    end
-    if size(compMatInv,1) > 32
-        error('higher than 5th order compression not yet coded!')
-    end
-    % Uncompress 2nd and higher orders
-    phs_spha_a = compMatInv*phs_spha(5:end,:);
-    phs_spha_a = reshape(phs_spha_a, [size(phs_spha_a,1), sz_a(2:end)]);
-    phs_spha = cat(1, phs_spha(1:4,:,:,:,:,:), phs_spha_a);
-    phs_spha = permute(phs_spha,[2 1 3:6]);
+if ~isempty(opt.compMat) && opt.uncompress
+    phs_spha = harmonicsUncompress(phs_spha,opt.compMat);
 end
 
 % Format output and scale phase by gammas
