@@ -11,5 +11,7 @@ function [phs_spha,phs_conc] = interpTrajTime(phs_spha,phs_conc,tdwell_in,delTim
 
     trajTim = -delTime + tdwell_in*(0:size(phs_spha,1)-1); 
     phs_spha = interp1(trajTim, phs_spha, datatime, 'makima',0); 
-    phs_conc = interp1(trajTim, phs_conc, datatime, 'makima',0); 
+    if ~isempty(phs_conc)
+        phs_conc = interp1(trajTim, phs_conc, datatime, 'makima',0); 
+    end
 end
