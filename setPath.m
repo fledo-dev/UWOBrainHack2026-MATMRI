@@ -29,5 +29,5 @@ function setPath
   
    % Set matMRI version
   global matMRIVersion
-  matMRIVersion = 1.12;
+  matMRIVersion = 1.13;
 end
