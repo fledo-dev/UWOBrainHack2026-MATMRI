@@ -1,4 +1,4 @@
-function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
+function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax,opt)
     % Use balanced FISTA to solve argmin(||Ax-b||^2_2 + lam*||Rx||_1)  
     %
     % x = fista(Ain,bin,Rin,x0,NitMax,options)
@@ -84,8 +84,11 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
 
     % Initialize
     y = x0;
-    resSqAll = zeros(NitMax+1,2);
-    RxAll = zeros(NitMax+1,2);
+    resSqAll = zeros(NitMax+1,1);
+    RxAll = zeros(NitMax+1,1);
+    testAll = zeros(NitMax+1,1);
+    resSqAllTrue = zeros(NitMax+1,1);
+    RxAllTrue = zeros(NitMax+1,1);
     mseAll = zeros(NitMax+1,1);
     if ~isempty(opt.gtruth)
         tmp = opt.gtruth(:)-x0(:);
@@ -93,16 +96,16 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
     end
     
     % Get first points for tracking convergence of residuals
-    if nargout > 1
-        warning('Residual output is requested. This DRASTICALLY increases computation time, and should only be done for demos/development/debugging')
+    if nargout > 4
+        warning('True residual output is requested. This DRASTICALLY increases computation time, and should only be done for demos/development/debugging')
         residual = A(x0,'notransp')-bin;
-        resSqAll(1,1) = residual(:)'*residual(:);
+        resSqAllTrue(1) = residual(:)'*residual(:);
     end
-    if nargout > 2
+    if nargout > 5
         l1norm = abs(lam*(R(x0,'notransp')));
-        RxAll(1,1) = gather(sum(l1norm(:)));
+        RxAllTrue(1) = gather(sum(l1norm(:)));
     end
-    if (nargout > 3) && ~isempty(opt.gtruth)
+    if (nargout > 6) && ~isempty(opt.gtruth)
         tmp = opt.gtruth(:)-x0(:);
         mseAll(1) = tmp'*tmp;
     end
@@ -117,7 +120,7 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         % Find gradient for ||Ax-b||^2_2
         residual_y = A(y,'notransp')-bin;
         grad = 2*A(residual_y,'transp');
-        resSqAll(nit,2) = residual_y(:)'*residual_y(:);
+        resSqAll(nit) = residual_y(:)'*residual_y(:);
         
         % Perform the step along the gradient (this is just simple gradient decent)
         g = y - stepSz*grad;
@@ -134,7 +137,7 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         %   true for both the decimated and undecimated wavelet tranform.
         x = R(g,'notransp');
         tmp = abs(lam*x);
-        RxAll(nit,2) = gather(sum(tmp(:)));
+        RxAll(nit) = gather(sum(tmp(:)));
         x = softthresh(x,lam*stepSz); 
         x = R(x,'transp');
 
@@ -149,7 +152,7 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         %   outside the k-space support (e.g., corners of k-space when a
         %   spherical sampling pattern is used) are poorly conditioned.
         %   Still not sure if this is beneficial (CB), since wavelet
-        %   regularization controls noise amplification anyway. When I've
+        %   regularization controls noise amplification anyway. When gI've
         %   tried this in combination with wavelet, image looks comparable
         %   but ringing is worsened due to the sharp edges in k-space introduced.
         if ~isempty(opt.kMask)
@@ -163,18 +166,19 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
         end
         
         % Update tracking
-        if nargout > 1
+        if nargout > 4
+            % True residual, after soft thresholding
             residual = A(x,'notransp')-bin;
-            resSqAll(nit,1) = residual(:)'*residual(:);
+            resSqAllTrue(nit) = residual(:)'*residual(:);
         end
-        if nargout > 2
+        if nargout > 5
             % Note that Rin'*Rin = I does NOT ensure that Rin*Rin' = I
             % (e.g., undecimated wavelet xform), which is why we have to
             % re-evalue the transform
             l1norm = abs(lam*(R(x,'notransp')));
-            RxAll(nit,1) = gather(sum(l1norm(:)));
+            RxAllTrue(nit) = gather(sum(l1norm(:)));
         end
-        if (nargout > 3) && ~isempty(opt.gtruth)
+        if (nargout > 6) && ~isempty(opt.gtruth)
             tmp = opt.gtruth(:)-x(:);
             mseAll(nit) = tmp'*tmp;
         end
@@ -193,8 +197,9 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
             finished = 1;
         end
         if nit>1
-            testVal = abs((resSqAll(nit,2)-resSqAll(nit-1,2))/resSqAll(nit-1,2)) +...
-                abs((RxAll(nit,2)-RxAll(nit-1,2))/RxAll(nit-1,2));
+            testVal = abs((resSqAll(nit)-resSqAll(nit-1))/resSqAll(nit-1)) +...
+                abs((RxAll(nit)-RxAll(nit-1))/RxAll(nit-1));
+            testAll(nit-1) = testVal;
         end
         if (nit>1) && testVal<opt.resThresh
             strmsg = 'opt.resThresh';
@@ -209,6 +214,9 @@ function [x, resSqAll, RxAll, mseAll, maxEig] = bfista(Ain,bin,Rin,lam,x0,NitMax
     % Clean up
     resSqAll = resSqAll(1:nit,:);
     RxAll = RxAll(1:nit,:);
+    testAll = testAll(1:nit,:);
+    resSqAllTrue = resSqAll(1:nit,:);
+    RxAllTrue = RxAll(1:nit,:);
     mseAll = mseAll(1:nit,:);
     
 end

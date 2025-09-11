@@ -30,6 +30,14 @@ function y = mrSampFunc(x,transp,samplingOp,R,opt)
 %         dimensions during forward operation, after application of R.
 %         Useful for SMS recons, or ESPIRiT-based R with multiple sets
 %         of maps.
+%       opt.W (default = []): weights to apply to data before adjoint
+%           operation. Equivalent to applying density compensation during
+%           gridding. Useful for hastening convergence (see
+%           https://pubmed.ncbi.nlm.nih.gov/28940748/). NOTE: this makes
+%           the adjoint NOT a true adjoint, but when applying forward and
+%           adjoint back-to-back as is done in gradient based iterative
+%           methods, this is equivalent to applying sqrt(W) on each. Use
+%           with caution.
 %  Forward operation converts image domain to data samples. Adjoint
 %  converts data samples to image domain
 %
@@ -59,8 +67,11 @@ end
 if nargin<5 || ~isfield(opt,'sumDims')
     opt.sumDims = [];
 end
-if nargin<5 || ~isfield(opt,'hardReal')
+if nargin<5 || ~isfield(opt,'hardReal') || isempty(opt.hardReal)
     opt.hardReal = 0;
+end
+if nargin<5 || ~isfield(opt,'W')
+    opt.W = [];
 end
 
 % Check incompatibilities
@@ -107,10 +118,13 @@ switch transp
         if ~isempty(opt.tikReg)
             x = [x; x_tik];
         end
-    case 'transp'
+    case 'transp' 
         if ~isempty(opt.tikReg)
             x_tik = x(prod(opt.daNFull)+1:end);
             x = x(1:prod(opt.daNFull));
+        end
+        if ~isempty(opt.W)
+            x = x.*opt.W;
         end
         if ~isempty(opt.daNFull)
             x = reshape(x,opt.daNFull);
