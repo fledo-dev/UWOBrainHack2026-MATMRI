@@ -103,13 +103,14 @@ classdef sampHighOrder
         b0mask = [];
         phs_spha = []; % 0th, 1st, 2nd and 3rd order spherical harmonic terms for phase over time. Must have dimensions 16 x size(sampTimes). 
         phs_conc = []; % conc grad terms for phase over time. Must have dimensions 4 x size(sampTimes). 
-        phs_grid = []; % Struct with fields phs_grid.x, phs_grid.x, phs_grid.x. Each must have dimensions equivalent to b0. MUST be in magnet frame.
+        phs_grid = []; % Struct with fields phs_grid.x, phs_grid.y, phs_grid.z. Each must have dimensions equivalent to b0. MUST be in magnet frame.
 		sampTimes = []; % sec
 		kbase = []; % spatial part of spherical harmonics that is multiplied with phs_spha or phs_conc terms
         phiDiv = []; % temporal derivative of kbase. Can be used to find global delays. See DOI: 10.1002/mrm.29460
 		traj = [];		  % Precomputed values for interpolated approach
         svdSpace = [];    % Precomputed values for interpolated approach
         svdTime = [];     % Precomputed values for interpolated approach
+        svdTimeSub = [];  % subsampled version of svdTime
         phsShft = [];
 		kSize = [];
 		imSize = [];
@@ -141,6 +142,7 @@ classdef sampHighOrder
             if nargin>8 && ~isempty(approach)
                 obj.approach = approach;
             end
+            svdNtry = [];
             if nargin>9 && ~isempty(opt) 
                 if isfield(opt,'svdThresh') && ~isempty(opt.svdThresh)
                     obj.svdThresh = opt.svdThresh;
@@ -156,6 +158,9 @@ classdef sampHighOrder
                 end
                 if isfield(opt,'segmentedNdiv') && ~isempty(opt.segmentedNdiv)
                     obj.segmentedNdiv = opt.segmentedNdiv;
+                end
+                if isfield(opt,'svdNtry') && ~isempty(opt.svdNtry)
+                    svdNtry = opt.svdNtry;
                 end
             end
             % Check inputs.
@@ -269,7 +274,7 @@ classdef sampHighOrder
                 case 0
                     obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
                 case 1
-                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft] = prepForInterp(obj);
+                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft,obj.svdTimeSub] = prepForInterp(obj,svdNtry);
                     if obj.useGPU
                         obj.svdTime = gpuArray(obj.svdTime);
                         obj.svdSpace = gpuArray(obj.svdSpace);
@@ -611,12 +616,9 @@ classdef sampHighOrder
             obj.ksphaDiv = ksphaDiv;
             obj.kconcDiv = kconcDiv;
         end
-		
-		function [svdTime,svdSpace,traj,phsShft] = prepForInterp(obj)
-			% Create nufft object
-            % TODO: subsampling in space should use fourier domain subsampling
-            % followed by zero filling. Should probably be paired with a
-            % mask
+
+        function [traj,strtIndSpha, phsShft] = createNufftForInterp(obj)
+        	% Create nufft object
             % TODO: could only compute SVD for voxels in the supplied
             % mask. However, this might cause issues for SMS, since the kz
             % part probably shouldn't be masked.
@@ -689,6 +691,15 @@ classdef sampHighOrder
 			traj = nufftOp(sz_nufft, kloc(:,:)',[],obj.useGPU);
             traj.loopDim = 5;
 			clear kloc
+        end
+		
+        function [svdTime,svdSpace,traj,phsShft,svdTimeSub] = prepForInterp(obj,ntry)
+            if nargin<2 || isempty(ntry)
+                % Number of singular values expected
+                ntry = 30;
+            end
+            % Create trajectory
+		    [traj, strtIndSpha, phsShft]  = createNufftForInterp(obj);
 			%%% Determine full non-linear encoding matrix
             if obj.subFactSpc>1
                 % Subsample in space  Note that fft-based is not
@@ -790,18 +801,12 @@ classdef sampHighOrder
             % Find largest singular values and vectors. Should replace
             % below with svdsketch once it supports GPU.
             S = 1;
-            ntry = 0;
-            if obj.svdThresh < 0.055
-                delTry = 30;
-            else
-                delTry = 20;
-            end
+            tryFact = 1.2;
             subspcFact = 3;
             while (min(diag(S))/max(S(:)) > obj.svdThresh) 
                 if ntry > 200
                     error('many large singular values. Try providing mask or adjusting svdThresh.')
                 end
-                ntry = ntry + delTry;
                 if obj.useSingle
                     b = double(b);
                 end
@@ -813,12 +818,13 @@ classdef sampHighOrder
                 end
                 if FLAG
                     warning('svd failure to converge. Increasing subspace.')
-                    ntry = ntry - delTry;
                     subspcFact = subspcFact+1;
                 end
+                ntry = ceil(tryFact*ntry); 
             end
             Ns = find(diag(S)/max(S(:))<obj.svdThresh,1,'first');
             svdTime = conj(V(:,1:Ns)*S(1:Ns,1:Ns));
+            svdTimeSub = svdTime;
             if obj.subFact > 1
                 % Fill back in values if interpolation was used
                 svdTime = reshape(svdTime, [length(inds),obj.kSize(2:end),size(svdTime,2)]);
@@ -874,6 +880,61 @@ classdef sampHighOrder
                 erVal = erVal(:) - gather(b(:));
                 erVal = norm(erVal)/norm(b(:))
 			end
+        end
+
+        function obj = updateObj(obj,phs_spha,phs_conc,b0map,b0mask,phs_grid)
+            % Update the key parts of this object without deleting the
+            % whole thing. Useful for multislice or multivolume
+            % acquisitions
+            if obj.useSingle
+                phs_spha = single(phs_spha);
+                phs_conc = single(phs_conc);
+                b0map = single(b0map);
+                b0mask = single(b0mask);
+                phs_grid.x = single(phs_grid.x);
+				phs_grid.y = single(phs_grid.y);
+				phs_grid.z = single(phs_grid.z);
+            end
+            if obj.useGPU
+                obj.phs_spha = gpuArray(phs_spha);
+                obj.phs_conc = gpuArray(phs_conc);
+                obj.b0 = gpuArray(b0map);
+                obj.b0mask = gpuArray(b0mask);
+                obj.phs_grid.x = gpuArray(phs_grid.x);
+				obj.phs_grid.y = gpuArray(phs_grid.y);
+				obj.phs_grid.z = gpuArray(phs_grid.z);
+            else
+                obj.phs_spha = phs_spha;
+                obj.phs_conc = phs_conc;
+                obj.b0 = b0map;
+                obj.b0mask = b0mask;
+                obj.phs_grid.x = phs_grid.x;
+				obj.phs_grid.y = phs_grid.y;
+				obj.phs_grid.z = phs_grid.z;
+            end
+            switch obj.approach
+                case 1
+                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft,obj.svdTimeSub] = prepForInterp(obj);
+                    %
+                    % % This uses existing svdTime to compute new svdSpace. 
+                    % % Potentially useful in multislice applications where eddy
+                    % % currents do not vary much from slice to slice, however I have
+                    % % surprisingly found that this is no faster than just doing an SVD
+                    % % in prepForInterp! Can also introduce error...
+                    % [obj.traj, strtIndSpha, obj.phsShft] = createNufftForInterp(obj);
+                    % if obj.subFactSpc>1
+                    %     error('subsample in space not coded in updateFP')
+                    % end
+                    % % Subsample in time
+                    % [phs_spha_in, phs_conc_in, sampTimes_in] = subSampTime(obj,obj.subFact);
+                    % % Find the full encoding matrix, less the terms included in nufft
+                    % b = prepForDirect(obj,phs_spha_in,phs_conc_in,sampTimes_in,[1,strtIndSpha:size(obj.phs_spha,1)]);
+                    % b = exp(1i*b);
+                    % % Find svdSpace
+                    % obj.svdSpace = b/(obj.svdTimeSub.');
+                otherwise
+                    error('this case not yet coded')
+            end
         end
         
         function [phs_spha_out, phs_conc_out, sampTimes_in, inds, phs_spha_in, phs_conc_in] = subSampTime(obj,subfact_in)
