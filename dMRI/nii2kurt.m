@@ -27,6 +27,8 @@ function [Dmean,Dpar,Dperp,Wmean,Kpar,Kperp,FA,fshells,FAvec,Dpowder,Wpowder] = 
 %                   and dcm2niix outputs). Include name, but not extension
 %               Units: s/mm2 (important for spatial regularization so that
 %               D and K are scaled properly relative to each other).
+%               If a .bmat file is found, this is used to exlude STE
+%               acquisitions in the kurtosis fitting.
 %   freqs:      path to file in the same format as .bval file, but instead specifying 
 %                   OGSE frequencies (use 0 for PGSE). Only used for
 %                   binning to get estimates at each freq. Units of Hz.
@@ -125,6 +127,20 @@ bval = bval(:);
 bvec = bvec.';
 bvec = bvec./sum(bvec.^2,2); % normalize
 bvec(isnan(bvec))=0; % avoid nan if bvec=[0 0 0] (b0)
+if exist([bfiles,'.bmat'],'file')
+    % Exclude non linear encoded scans, which can happen for combined OGSE
+    % and b-tensor encoded scans
+    bmat = load([bfiles,'.bmat']);
+    brank = bmatRank(bmat, opt.bthresh/3);
+    nonRank1 = brank' > 1.5;
+    if any(nonRank1)
+        fprintf('%d non-LTE scans ignored and %d LTE scans retained...\n', sum(nonRank1), sum(~nonRank1));
+        im = im(:,:,:,~nonRank1);
+        bval = bval(~nonRank1);
+        bvec = bvec(~nonRank1,:);
+    end
+end
+
 
 if ischar(freqs)
     % Text file, in the same format as .bval file, which indicates which
