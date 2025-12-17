@@ -185,7 +185,7 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
         
         % Perform FISTA step
         t = 0.5*(1 + sqrt(1+4*t_prev^2));
-        y = x + (t-1)/t_prev*(x-x_prev);
+        y = x + (t_prev-1)/t*(x-x_prev);
         
         % Update vars
         t_prev = t;
