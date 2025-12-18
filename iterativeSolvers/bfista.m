@@ -215,10 +215,10 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
                 (resSqAll(nit)+RxAll(nit));
             i1 = max(1,nit-numAve);
             testVal = mean(testVal(i1:end));
-            testAll(nit-1,1) = testVal;
+            testAll(nit,1) = testVal;
             % Also compute change in image. This could be an alternative
             % for stopping criteria...
-            testAll(nit-1,2) = real(xdiff(:)'*xdiff(:)) / real(x(:)'*x(:));
+            testAll(nit,2) = real(xdiff(:)'*xdiff(:)) / real(x(:)'*x(:));
         end
         if (nit>1) && testVal<opt.resThresh
             strmsg = 'opt.resThresh';
@@ -238,7 +238,7 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
     % Clean up
     resSqAll = resSqAll(1:nit-1,:);
     RxAll = RxAll(1:nit-1,:);
-    testAll = testAll(1:nit-2,:);
+    testAll = testAll(1:nit-1,:); testAll(1,:) = NaN; % Can only start computing on iteration 2
     resSqAllTrue = resSqAll(1:nit-1,:);
     RxAllTrue = RxAll(1:nit-1,:);
     mseAll = mseAll(1:nit-1,:);
