@@ -28,8 +28,8 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
         opt.maxEig = []; 
     end
     if nargin<7 || ~isfield(opt,'resThresh')
-        % Threhold for residuals (to automatically stop iterations)
-        opt.resThresh = 1e-4; 
+        % Threhold for change in cost function (to automatically stop iterations)
+        opt.resThresh = 1e-5; 
     end
     if nargin<7 || ~isfield(opt,'gtruth')
         % Useful for simulations. Allows computation of mse per iteration
@@ -46,6 +46,13 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
     if nargin<7 || ~isfield(opt,'kMask')
         % whether to enforce bounded k-space support
         opt.kMask = []; 
+    end
+    if nargin<7 || ~isfield(opt,'nRestart')
+        % Restart fista accelleration every nRestart iterations. Helps
+        % avoid oscillations from developing too much inertia.
+        % Note: does not seem needed for MRI recons we are doing
+        % Could try adaptive restarts like in https://link.springer.com/article/10.1007/s10957-025-02688-3
+        opt.nRestart = NitMax+1; 
     end
     
     % Account for different ways of supplying A
@@ -86,7 +93,7 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
     y = x0;
     resSqAll = zeros(NitMax+1,1);
     RxAll = zeros(NitMax+1,1);
-    testAll = zeros(NitMax+1,1);
+    testAll = zeros(NitMax+1,2);
     resSqAllTrue = zeros(NitMax+1,1);
     RxAllTrue = zeros(NitMax+1,1);
     mseAll = zeros(NitMax+1,1);
@@ -113,6 +120,7 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
     % Iterate
     finished = 0;
     nit = 1;
+    nitToRestart = 1;
     t_prev = 1;
     x_prev = x0;
     strmsg = [];
@@ -120,7 +128,7 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
         % Find gradient for ||Ax-b||^2_2
         residual_y = A(y,'notransp')-bin;
         grad = 2*A(residual_y,'transp');
-        resSqAll(nit) = residual_y(:)'*residual_y(:);
+        resSqAll(nit) = real(residual_y(:)'*residual_y(:));
         
         % Perform the step along the gradient (this is just simple gradient decent)
         g = y - stepSz*grad;
@@ -169,7 +177,7 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
         if nargout > 4
             % True residual, after soft thresholding
             residual = A(x,'notransp')-bin;
-            resSqAllTrue(nit) = residual(:)'*residual(:);
+            resSqAllTrue(nit) = real(residual(:)'*residual(:));
         end
         if nargout > 5
             % Note that Rin'*Rin = I does NOT ensure that Rin*Rin' = I
@@ -180,12 +188,13 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
         end
         if (nargout > 6) && ~isempty(opt.gtruth)
             tmp = opt.gtruth(:)-x(:);
-            mseAll(nit) = tmp'*tmp;
+            mseAll(nit) = real(tmp'*tmp);
         end
         
         % Perform FISTA step
+        xdiff = x-x_prev;
         t = 0.5*(1 + sqrt(1+4*t_prev^2));
-        y = x + (t-1)/t_prev*(x-x_prev);
+        y = x + (t_prev-1)/t * xdiff;
         
         % Update vars
         t_prev = t;
@@ -197,27 +206,42 @@ function [x, resSqAll, RxAll, testAll, resSqAllTrue, RxAllTrue, mseAll, maxEig] 
             finished = 1;
         end
         if nit>1
-            testVal = abs((resSqAll(nit)-resSqAll(nit-1))/resSqAll(nit-1)) +...
-                abs((RxAll(nit)-RxAll(nit-1))/RxAll(nit-1));
-            testAll(nit-1) = testVal;
+            % Change in cost function relative to current value. Uses an
+            % average over last several iterations because things like
+            % fista restarts or oscillations can momentarily cause a very
+            % low difference.
+            numAve = 3;
+            testVal = abs(diff(resSqAll(1:nit)+RxAll(1:nit))) / ...
+                (resSqAll(nit)+RxAll(nit));
+            i1 = max(1,nit-numAve);
+            testVal = mean(testVal(i1:end));
+            testAll(nit,1) = testVal;
+            % Also compute change in image. This could be an alternative
+            % for stopping criteria...
+            testAll(nit,2) = real(xdiff(:)'*xdiff(:)) / real(x(:)'*x(:));
         end
         if (nit>1) && testVal<opt.resThresh
             strmsg = 'opt.resThresh';
             finished = 1;
         end
         nit = nit+1;
+        nitToRestart = nitToRestart+1;
+        if nitToRestart >= opt.nRestart
+            nitToRestart = 1;
+            t_prev = 1;
+        end
     end
     if opt.verbose
         fprintf('bfista: stopped on %s after %d iterations\n', strmsg, nit);
     end
 
     % Clean up
-    resSqAll = resSqAll(1:nit,:);
-    RxAll = RxAll(1:nit,:);
-    testAll = testAll(1:nit,:);
-    resSqAllTrue = resSqAll(1:nit,:);
-    RxAllTrue = RxAll(1:nit,:);
-    mseAll = mseAll(1:nit,:);
+    resSqAll = resSqAll(1:nit-1,:);
+    RxAll = RxAll(1:nit-1,:);
+    testAll = testAll(1:nit-1,:); testAll(1,:) = NaN; % Can only start computing on iteration 2
+    resSqAllTrue = resSqAll(1:nit-1,:);
+    RxAllTrue = RxAll(1:nit-1,:);
+    mseAll = mseAll(1:nit-1,:);
     
 end
 

@@ -108,15 +108,21 @@ x0 = cgne(opFunc,data,[],2);
 NitMax = 200;
 opt.resThresh = 1e-4; % use fractional change in (||Ax-b||^2_2 + lambda*||Wx||_1) from last iteration to stop iterations
 opt_bfista.gtruth = im0; % For these sims, we know the ground truth and can thus track mean square error
-[imCS, resSqAll, RxAll, mseAll] = bfista(opFunc,data,W,lambda,x0,NitMax,opt_bfista);
+[imCS, resSqAll, RxAll, delVals,~,~,mseAll] = bfista(opFunc,data,W,lambda,x0,NitMax,opt_bfista);
 
 %% Plotting. Note that imCS has much less noise than im.
 figure;
 subplot(2,3,1); imagesc(permute(abs(im0),[2,1]),[0 0.006]); title('Ground truth'); axis('image'); axis('off'); colormap('gray');
 subplot(2,3,2); imagesc(permute(abs(im),[2,1]),[0 0.006]); title('Early stopping regularization'); axis('image'); axis('off'); colormap('gray');
 subplot(2,3,3); imagesc(permute(abs(imCS),[2,1]),[0 0.006]); title('Wavelet regularization'); axis('image'); axis('off'); colormap('gray');
-subplot(2,3,4); plot(log10(resSqAll(:,1))); ylabel('Data consistency'); xlabel('iterations');
-subplot(2,3,5); plot(log10(RxAll(:,1))); ylabel('Wavelet l1 norm'); xlabel('iterations');
+subplot(2,3,4); plot(log10(abs(resSqAll(:,1)))-log10(abs(resSqAll(end,1)))); 
+hold('all'); plot(log10(abs(RxAll(:,1)))-log10(abs(RxAll(end,1)))); 
+plot(log10(abs(resSqAll(:,1)+RxAll(:,1)))-log10(abs(resSqAll(end,1)+RxAll(end,1)))); 
+xlabel('iterations'); ylabel('log10(cost fcn values)')
+legend('Data consistency', 'wavelet', 'net cost function')
+subplot(2,3,5); plot(log10(delVals(:,1))); hold('all')
+plot(log10(sqrt(delVals(:,2)))); 
+ylabel('log10(normalized difference)'); xlabel('iterations'); legend('diff(cost)/cost','||diff(image)|| / ||image||')
 subplot(2,3,6); plot(log10(mseAll)); ylabel('Mean squared error'); xlabel('iterations');
 
 

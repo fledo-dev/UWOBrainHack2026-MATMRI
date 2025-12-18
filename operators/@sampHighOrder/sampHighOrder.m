@@ -803,19 +803,14 @@ classdef sampHighOrder
             S = 1;
             tryFact = 1.2;
             subspcFact = 3;
+            if obj.useSingle
+                b = double(b);
+            end
             while (min(diag(S))/max(S(:)) > obj.svdThresh) 
                 if ntry > 200
                     error('many large singular values. Try providing mask or adjusting svdThresh.')
                 end
-                if obj.useSingle
-                    b = double(b);
-                end
                 [U,S,V,FLAG] = svds(b,ntry,'largest','SubspaceDimension',subspcFact*ntry);
-                if obj.useSingle
-                    U = single(U);
-                    S = single(S);
-                    V = single(V);
-                end
                 if FLAG
                     warning('svd failure to converge. Increasing subspace.')
                     subspcFact = subspcFact+1;
@@ -823,6 +818,11 @@ classdef sampHighOrder
                 ntry = ceil(tryFact*ntry); 
             end
             Ns = find(diag(S)/max(S(:))<obj.svdThresh,1,'first');
+            if obj.useSingle
+                U = single(U);
+                S = single(S);
+                V = single(V);
+            end
             svdTime = conj(V(:,1:Ns)*S(1:Ns,1:Ns));
             svdTimeSub = svdTime;
             if obj.subFact > 1
