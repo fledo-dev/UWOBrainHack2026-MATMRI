@@ -1,4 +1,5 @@
-function [uFA,Klin,Kiso,D,uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2,sSTE,sLTE] = nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
+function [uFA,Klin,Kiso,D,uFA_FWE,Kiso_FWE,Klin_FWE,D_FWE,sf_FWE,uA2,sSTE,sLTE,bshells_ste,bshells_lte] =...
+    nii2uFA_fwe(file, bvals, isIso, maskfile, opt, savename)
 %
 %   Estimate microscopic fractional anisotropy and related parameters with a 
 %   free water elimination approach applied to the powder average signal.
@@ -167,11 +168,12 @@ else
 end
 
 % Take abs of image, in case of negative values after denoising etc.
-im = abs(im);
+% CB: moved to after powder averaging
+%im = abs(im);
 
 % Expand mask to include voxels that are 0 in all acquisitions (can happen
 % from eddy current correction)
-mask = and(mask, sum(im,4) > 2*eps);
+mask = and(mask, abs(sum(im,4)) > 2*eps);
 
 %% Find and sort b-shells
 bval = bval(:);
@@ -242,6 +244,13 @@ for n=1:length(bshells_lte)
     im_t = mean(im(:,:,:,inds),4);
     signal_LTE(n,:) = im_t(mask);
 end
+if any(signal_LTE(:)<0)
+    signal_LTE = abs(signal_LTE);
+end
+if any(signal_STE(:)<0)
+    signal_STE = abs(signal_STE);
+end
+
 
 %% Prep output
 szIm = size(im);
@@ -332,13 +341,14 @@ else % Saving empty outputs in case no FWE was done
     uFA_FWE = [];   
 end
 
-%% Compute uA^22 if the shells support it
+%% Compute uA^22 if the shells support it. Use um2/m for b
 uA2 = [];
 uA22 = [];
 if abs(max(bshells_lte)-max(bshells_ste))/(max(max(bshells_lte),max(bshells_ste))) < 0.05
     [~,ind_lte] = max(bshells_lte);
     [~,ind_ste] = max(bshells_ste);
-    uA22 = log(signal_LTE(ind_lte,:)./signal_STE(ind_ste,:))/mean([bshells_lte(ind_lte),bshells_ste(ind_ste)])^2;
+    b_uA2 = mean([bshells_lte(ind_lte),bshells_ste(ind_ste)])/1e3;
+    uA22 = log(signal_LTE(ind_lte,:)./signal_STE(ind_ste,:))/b_uA2^2;
     uA22(uA22 < 0) = 0;
     if useGPU
         uA2 = gather(uA2);
@@ -360,6 +370,9 @@ for n=1:size(signal_STE,1)
     sSTE(:,:,:,n) = tmp;
 end
 clear tmp
+
+bshells_lte = gather(bshells_lte/1000);
+bshells_ste = gather(bshells_ste/1000);
 
 %% Create NIFTI files. Inherit header information from input NIFTI
 if opt.saveNifti && ischar(file)
