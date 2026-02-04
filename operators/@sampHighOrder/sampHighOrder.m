@@ -111,6 +111,7 @@ classdef sampHighOrder
         svdSpace = [];    % Precomputed values for interpolated approach
         svdTime = [];     % Precomputed values for interpolated approach
         svdTimeSub = [];  % subsampled version of svdTime
+        smsPhase = [];    % Phase from CAIPI gradients used for SMS
         phsShft = [];
 		kSize = [];
 		imSize = [];
@@ -274,7 +275,7 @@ classdef sampHighOrder
                 case 0
                     obj.kbase = prepForDirect(obj,obj.phs_spha,obj.phs_conc,obj.sampTimes);
                 case 1
-                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft,obj.svdTimeSub] = prepForInterp(obj,svdNtry);
+                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft,obj.svdTimeSub,obj.smsPhase] = prepForInterp(obj,svdNtry);
                     if obj.useGPU
                         obj.svdTime = gpuArray(obj.svdTime);
                         obj.svdSpace = gpuArray(obj.svdSpace);
@@ -324,11 +325,13 @@ classdef sampHighOrder
                 x_a = reshape(x_a, [obj.kSize, NRep]);
                 y = x_a.*conj(reshape(obj.svdTime, [obj.kSize,1,nbins])); 
                 y = conj(obj.phsShft).*y;
-                y = obj.traj'*y;
                 if (length(obj.imSize)>2) && (obj.imSize(3)>1) && (obj.imSize(3)<obj.num3DSlc)
-                    % SMS-like
-                    y = reshape(y, [obj.imSize(1:2), 1, NRep, nbins])/sqrt(2);
+                    % SMS-like. 
+                    y = reshape(y,[obj.kSize, 1, NRep, nbins]);
+                    y = y.*conj(obj.smsPhase);
+                    y = y/sqrt(size(y,2));
                 end
+                y = obj.traj'*y;
                 y = y.*conj(reshape(obj.svdSpace, [obj.imSize,1,nbins]));
                 y = sum(y,ndims(y));
                 y = reshape(y, [obj.imSize, szx(obj.NDimk+1:end)]);
@@ -339,11 +342,12 @@ classdef sampHighOrder
                 NRep = numel(x_a)/prod(obj.imSize);
                 x_a = reshape(x_a, [obj.imSize, NRep]);  
                 y = x_a.*reshape(obj.svdSpace, [obj.imSize,1,nbins]);
-                if (length(obj.imSize)>2) && (obj.imSize(3)>1) && (obj.imSize(3)<obj.num3DSlc)
-                    % SMS-like
-                    y = sum(y,3)/sqrt(2);
-                end
                 y = obj.traj*y;
+                if (length(obj.imSize)>2) && (obj.imSize(3)>1) && (obj.imSize(3)<obj.num3DSlc)
+                    % SMS-like. 
+                    y = y.*obj.smsPhase;
+                    y = sum(y,2)/sqrt(size(y,2));
+                end
                 y = obj.phsShft.*reshape(y, [obj.kSize,NRep,nbins]);
                 y = y.*reshape(obj.svdTime, [obj.kSize,1,nbins]);
                 y = sum(y,ndims(y));
@@ -693,7 +697,8 @@ classdef sampHighOrder
 			clear kloc
         end
 		
-        function [svdTime,svdSpace,traj,phsShft,svdTimeSub] = prepForInterp(obj,ntry)
+        function [svdTime,svdSpace,traj,phsShft,svdTimeSub,smsPhase] = prepForInterp(obj,ntry)
+            smsPhase = [];
             if nargin<2 || isempty(ntry)
                 % Number of singular values expected
                 ntry = 30;
@@ -747,6 +752,7 @@ classdef sampHighOrder
                             obj.b0mask = interp3(double(obj.b0mask),Xnew,Ynew,Znew) > 0.5;
                         end
                     else
+                        % SMS-like
                         [Xold,Yold] = meshgrid(1:obj.imSize(2),1:obj.imSize(1));
                         [Xnew,Ynew] = meshgrid(linspace(1,obj.imSize(2),Nvox(2)),...
                             linspace(1,obj.imSize(1),Nvox(1)));
@@ -783,6 +789,19 @@ classdef sampHighOrder
                 phs_conc_test = interp1(inds,gather(permute(phs_conc_in, [2 1 3:10])),1:inds(end),'pchip');
                 b = prepForDirect(obj,phs_spha_test',phs_conc_test',obj.sampTimes,[1,strtIndSpha:size(obj.phs_spha,1)]);
                 err = b_gt - b; err = mean(err.*conj(err));
+            end
+            if (obj.NDim == 3) && (obj.imSize(3) <= obj.num3DSlc)
+                % SMS-like, where we handle kz separately, after nufft.
+                % This is to avoid time-subsampling, given that Gz can vary
+                % quickly for SMS
+                if abs(obj.phs_grid.z(2,2,1) - obj.phs_grid.z(1,1,1)) > eps
+                    error('SMS interpolation only coded for purely axial slices')
+                end
+                slicePos = squeeze(obj.phs_grid.z(1,1,:));
+                smsPhase = slicePos.*obj.phs_spha(4,:,:,:); 
+                smsPhase = permute(smsPhase,[2:ndims(smsPhase),1]);
+                smsPhase = exp(1i*smsPhase);
+                strtIndSpha = 5; 
             end
             % Find the full encoding matrix, less the terms included in nufft
             b = prepForDirect(obj,phs_spha_in,phs_conc_in,sampTimes_in,[1,strtIndSpha:size(obj.phs_spha,1)]);
@@ -914,7 +933,7 @@ classdef sampHighOrder
             end
             switch obj.approach
                 case 1
-                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft,obj.svdTimeSub] = prepForInterp(obj);
+                    [obj.svdTime,obj.svdSpace,obj.traj,obj.phsShft,obj.svdTimeSub,obj.smsPhase] = prepForInterp(obj);
                     %
                     % % This uses existing svdTime to compute new svdSpace. 
                     % % Potentially useful in multislice applications where eddy
