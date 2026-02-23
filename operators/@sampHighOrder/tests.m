@@ -189,7 +189,7 @@ cost = Sx(:)-Sx_b(:);
 cost = sqrt(sum(cost.*conj(cost)))/numel(cost);
 assert(cost < 1e-4, 'Interp comparison to direct failed with subsampling in space.')
 
-% Test interp with SMS-like acquisition (3D input, but too small to do
+%% Test interp with SMS-like acquisition (3D input, but too small to do
 % nufft on 3rd dim)
 opt.subFact = 2; % z-encoding for SMS can make aggressive subsampling introduce errors, so decrease it here. Note that 5 is likely still okay for real data - this sim has rapid variation
 b0 = cat(3,b0,0.5*b0);
@@ -197,7 +197,7 @@ phs_grid.x = repmat(phs_grid.x,[1 1 2]);
 phs_grid.y = repmat(phs_grid.y,[1 1 2]);
 phs_grid.z = cat(3,-0.3*phs_grid.z,0.7*phs_grid.z);
 dz = phs_grid.z(1,1,2)-phs_grid.z(1,1,1);
-phs_spha(4,:) = pi/dz*sin(4.8*(1:size(phs_spha,2))/N0);
+phs_spha(4,:) = pi/dz*sin(4.8*(1:size(phs_spha,2))/N0); % CAIPI-like gz
 xvec = cat(3, xvec, padcrop(phantom(round(N0/2)), size(xvec)));
 S = sampHighOrder(b0,sampTimes,phs_spha,phs_coco,phs_grid,[],useGPU,useSingle,0);
 Sx = S*xvec;
