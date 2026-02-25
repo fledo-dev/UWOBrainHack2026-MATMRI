@@ -4,7 +4,7 @@
 %
 % Corey Baron, 2016
 
-classdef dwt
+classdef dwtND
 properties
   adjoint = 0;
   inverse = 0; % Set to 1 to compute (W^H W)^-1 W^H. Note that (W^H W)^-1 = I for normal decimated or undecimated wavelet, but not 1 depending on "A" input.
@@ -25,7 +25,7 @@ properties
 end
 
 methods
-  function  obj = dwt(J,imSize, decimation, family, useGPUFlag, AFcn, AHAinvFcn, APrep)    % constructor
+  function  obj = dwtND(J,imSize, decimation, family, useGPUFlag, AFcn, AHAinvFcn, APrep)    % constructor
       if nargin<1
           % Perform unit tests if no inputs
           obj.tests;

@@ -68,7 +68,7 @@ opt.stopOnResInc = 0;
 % Build discrete wavelet transform object
 levelsPerDim = [2 2];
 isDec = 0; % Non-decimated to avoid blocky edges
-W = dwt(levelsPerDim,size(im),isDec);
+W = dwtND(levelsPerDim,size(im),isDec);
 wim = W*im;
 figure; imagesc(wim); title('Wavelet transform of cgne solution')
 

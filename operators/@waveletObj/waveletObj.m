@@ -1,5 +1,5 @@
 classdef waveletObj
-% Class for output of a wavelet transform performed by the dwt class.
+% Class for output of a wavelet transform performed by the dwtND class.
 %
 % Inspired by WAVELET class written by Matthieu Guerquin-Kern, Biomedical Imaging Group / EPF Lausanne, 17-07-2009
 %

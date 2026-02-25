@@ -6,5 +6,5 @@ nufftOp;
 rcvrOp;
 mrSampFunc;
 sampHighOrder;
-dwt;
+dwtND;
 spDiff;

@@ -20,7 +20,7 @@ for useGPU = [0,1]
     for isDec = [0,1]
         for nFam = 1:length(families)
             for nLev = 1:length(levToTest)
-                W = dwt(levToTest{nLev},size(im),isDec,families{nFam},useGPU);
+                W = dwtND(levToTest{nLev},size(im),isDec,families{nFam},useGPU);
                 wim = W*im;
                 im_a = W'*wim;
                 assert(norm(im(:)-im_a(:))/numel(im) < 1e-8, ...
@@ -39,7 +39,7 @@ for useGPU = [0,1]
             for nLev = 1:length(levToTest)
                 for opType = 1:3
                     
-                    W = dwt(levToTest{nLev},size(im),isDec,families{nFam},useGPU);
+                    W = dwtND(levToTest{nLev},size(im),isDec,families{nFam},useGPU);
                     wim = W*im;
                     switch opType
                         case 1
@@ -99,7 +99,7 @@ for useGPU = [0,1]
 end
 
 
-fprintf('dwt unit test success!\n')
+fprintf('dwtND unit test success!\n')
 return;
 
 
