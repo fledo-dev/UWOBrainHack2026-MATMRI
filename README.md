@@ -62,6 +62,12 @@ Add inline preprocessing options:
 - Colormap support with **dynamic colorbar display**
 - Transparency control for overlay blending
 
+#### 4. Automated SNR and tSNR Calculation
+- Compute SNR (Signal-to-Noise Ratio) from a single volume: mean signal in a user-defined ROI divided by the standard deviation of a background/noise region
+- Compute tSNR (Temporal SNR) across the time series: mean signal divided by its temporal standard deviation, computed voxel-wise
+- Generate and display tSNR maps as an overlay on the reference image
+- Report summary statistics (mean, median, min/max SNR/tSNR) across the whole brain or within a selected ROI
+
 ---
 
 ### Field Monitoring / Trajectory Validation
