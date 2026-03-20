@@ -1,41 +1,130 @@
-**Package for MRI. Supports:**
-  - Reconstruction
-    - non-Cartesian regridding
-    - iterative SENSE (Cartesian or non-Cartesian)
-    - iterative SENSE for higher order models that may include: 
-      - a B0 map
-      - time varying spherical harmonics of phase accrual
-  - diffusion MRI fitting
-    - spatially regularized diffusion kurtosis fitting with an axially symmetric model (nii2kurt.m)
-    - free water corrected kurtosis and micro-FA (nii2uFA_fwe.m). Cite with doi: 10.3389/fnins.2023.1074730
-    
-**Before Usage**
-  - run setPath.m to add all the directories to the Matlab path
-    
-**Includes a basic image viewer and ROI drawing tool called "bview"**
-  - enter "bview" in the Matlab command prompt to use
-    
-**Tips**
-  - step through the demos in the demos folder
-    - recommended order is demo_regridding, demo_regSENSE, demo_highOrder
-  - open files to read usage info
+## MatMRI
 
-**Notes**
-  - Matlab gpuArray functionality is used whenever possible, so a compatible GPU is strongly recommended
+**MatMRI** is a GPU-enabled MATLAB package for advanced MRI reconstruction, modeling, and quantitative analysis. It is designed for flexible handling of both Cartesian and non-Cartesian acquisitions, with a strong emphasis on model-based reconstruction and field-monitoring–informed workflows.
 
-**Acknowledgement**
-  - Cite as: 
-    1. Varela-Mattatall G, Dubovan PI, Santini T, Gilbert KM, Menon RS, Baron CA. Single-shot spiral diffusion-weighted imaging at 7T using expanded encoding with compressed sensing. Magn Reson Med. 2023 Apr 10. doi: 10.1002/mrm.29666
-    2. Baron CA (2021, February 2). MatMRI: A GPU enabled package for model based MRI image reconstruction. Zenodo. http://doi.org/10.5281/zenodo.4495476
-  - Additionally, please reference the following works for usage of the below functions:
-    - **nii2kurt**: Hamilton, J., Xu, K., Geremia, N., Prado, V. F., Prado, M. A. M., Brown, A., & Baron, C. A. (2024). Robust frequency-dependent diffusional kurtosis computation using an efficient direction scheme, axisymmetric modelling, and spatial regularization. Imaging Neuroscience, 2, 1–22.
-    - **nii2uFA_fwe**: Arezza NJJ, Santini T, Omer M, Baron CA. Estimation of free water-corrected microscopic fractional anisotropy. Front Neurosci. 2023 Mar 7;17:1074730. doi: 10.3389/fnins.2023.1074730. 
-    - **harmonicsFromRaw**: Dubovan PI, Gilbert KM, Baron CA. A correction algorithm for improved magnetic field monitoring with distal field probes. Magn Reson Med. 2023 Dec;90(6):2242-2260. doi: 10.1002/mrm.29781
-    - **findDelAuto**: Dubovan PI, Baron CA. Model-based determination of the synchronization delay between MRI and trajectory data. Magn Reson Med. 2022 Sep 26. doi:10.1002/mrm.29460.  
-    - **nufftOp**: Baron CA, Dwork N, Pauly JM, Nishimura DG. Rapid compressed sensing reconstruction of 3D non-Cartesian MRI. Magn. Reson. Med. 2018;79:2685–2692.
-    - **sampHighOrder**: 
-      - Wilm BJ, Barmet C, Pruessmann KP. Fast higher-order MR image reconstruction using singular-vector separation. IEEE Trans Med Imaging. 2012 Jul;31(7):1396-403. doi: 10.1109/TMI.2012.2190991. Epub 2012 Mar 14. Erratum in: IEEE Trans Med Imaging. 2012 Sep;31(9):1833.
-      - Baron CA, Dwork N, Pauly JM, Nishimura DG. Rapid compressed sensing reconstruction of 3D non-Cartesian MRI. Magn. Reson. Med. 2018;79:2685–2692.
-    
+**Package supports:**
+- **Reconstruction**
+  - non-Cartesian regridding
+  - iterative SENSE (Cartesian or non-Cartesian)
+  - iterative SENSE for higher-order signal models including:
+    - B0 inhomogeneity correction
+    - time-varying phase modeled with spherical harmonics (e.g., field probe–based encoding)
+- **Diffusion MRI fitting**
+  - spatially regularized diffusion kurtosis fitting with an axially symmetric model (`nii2kurt.m`)
+  - free water–corrected kurtosis and micro-FA (`nii2uFA_fwe.m`)  
+    - Cite: doi: 10.3389/fnins.2023.1074730
+
+---
+
+## Brainhack 2026 – UWO Project
+
+This repository is being extended as part of **Brainhack 2026 (Western University)**.
+
+### Project Goal
+The objective is to significantly improve the existing MATLAB-based image viewer **`bview`** to better support modern fMRI analysis and trajectory validation workflows, particularly for non-Cartesian acquisitions (e.g., spiral imaging with field monitoring).
+
+---
+
+## Current Tool: bview
+
+MatMRI includes a lightweight image viewer and ROI tool:
+
+- Launch with:
+  ```matlab
+  bview
+  ```
+
+- Current capabilities:
+  - Image visualization
+  - ROI drawing
+  - Basic interaction
+
+---
+
+## Planned Improvements
+
+### fMRI Functionality
+
+#### 1. Interactive Voxel Time Series
+- Click on a voxel in the image → automatically display its time series
+- Support **multi-dataset comparison**:
+  - Simultaneous plotting of time courses from ≥2 datasets (e.g., spiral vs EPI, reconstruction variants)
+
+#### 2. Time Series Processing
+Add inline preprocessing options:
+- Demeaning
+- Normalization (e.g., z-score or max scaling)
+- Percent signal change conversion
+
+#### 3. Activation Map Overlay
+- Overlay statistical maps (e.g., GLM t-maps) on anatomical/functional images
+- Adjustable thresholding
+- Colormap support with **dynamic colorbar display**
+- Transparency control for overlay blending
+
+---
+
+### Field Monitoring / Trajectory Validation
+
+#### processSkope Integration
+- `processSkope` outputs `.mat` files containing processed MRI field probe measurements (e.g., spherical harmonic coefficients over time)
+
+#### New Feature: k-space Trajectory Visualization
+- Load `processSkope` output directly in `bview`
+- Reconstruct and display **measured k-space trajectories**
+- Enable:
+  - Visual validation of trajectory fidelity
+  - Comparison against nominal trajectories
+  - Identification of trajectory errors or drift
+
+---
+
+## Before Usage
+- Run:
+  ```matlab
+  setPath.m
+  ```
+  to add all required directories to the MATLAB path.
+
+---
+
+## Tips
+- Step through demos in `/demos`:
+  - Recommended order:
+    1. `demo_regridding`
+    2. `demo_regSENSE`
+    3. `demo_highOrder`
+- Inspect function files for usage details and implementation specifics
+
+---
+
+## Notes
+- Uses MATLAB `gpuArray` wherever possible  
+  → A compatible GPU is strongly recommended for reconstruction workflows
+
+---
+
+## Acknowledgement
+
+**Cite as:**
+1. Varela-Mattatall G, Dubovan PI, Santini T, Gilbert KM, Menon RS, Baron CA.  
+   *Single-shot spiral diffusion-weighted imaging at 7T using expanded encoding with compressed sensing.*  
+   Magn Reson Med. 2023. doi: 10.1002/mrm.29666  
+
+2. Baron CA (2021).  
+   *MatMRI: A GPU enabled package for model based MRI image reconstruction.*  
+   Zenodo. http://doi.org/10.5281/zenodo.4495476  
+
+**Function-specific references:**
+- **nii2kurt**: Hamilton et al., Imaging Neuroscience (2024)  
+- **nii2uFA_fwe**: Arezza et al., Front Neurosci (2023)  
+- **harmonicsFromRaw**: Dubovan et al., Magn Reson Med (2023)  
+- **findDelAuto**: Dubovan et al., Magn Reson Med (2022)  
+- **nufftOp**: Baron et al., Magn Reson Med (2018)  
+- **sampHighOrder**:  
+  - Wilm et al., IEEE TMI (2012)  
+  - Baron et al., Magn Reson Med (2018)
+
+---
 
 (c) 2020, Corey Baron
