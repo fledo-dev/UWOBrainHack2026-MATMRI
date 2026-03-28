@@ -2674,6 +2674,205 @@ guidata(hObject, handles);
 showimage(hObject,handles)
 
 
+% --- Executes on button press in pushbutton33.
+function pushbutton33_Callback(hObject, eventdata, handles)
+
+if handles.imgopt == 2
+    set(handles.text24,'String','Click on an Image to Select Axes for Lesion')
+    w = waitforbuttonpress;
+    if w == 0
+        set(handles.text24,'String','Click on the Brightest part of lesion then nearby healthy tissue')
+    else
+        errordlg('Axes Not Selected!','Incorrect Selection','modal')
+        return
+    end
+end
+
+slice_select   = round(get(handles.slider1,'Value'));
+array_select   = round(get(handles.slider2,'Value'));
+array_select2  = round(get(handles.slider5,'Value'));
+
+% --- Multi-voxel selection loop ---
+set(handles.text24,'String', ...
+    'Click voxels to add time series. Press Enter or middle-click when done.')
+
+all_ts       = [];
+voxel_labels = {};
+vox_idx      = 0;
+
+while true
+    [y, x, button] = ginput(1);
+
+    if isempty(button) || button == 13 || button == 2
+        break
+    end
+
+    x = round(x);
+    y = round(y);
+
+    [nx, ny, ~, ~, ~] = size(handles.img_ex);
+    if x < 1 || x > nx || y < 1 || y > ny
+        set(handles.text24,'String','Voxel out of bounds — click again or press Enter to finish.')
+        continue
+    end
+
+    vox_idx = vox_idx + 1;
+    ts = squeeze(handles.img_ex(x, y, slice_select, :, array_select2));
+    all_ts(:, vox_idx)   = ts(:);                        %#ok<AGROW>
+    voxel_labels{vox_idx} = sprintf('(%d,%d) slice %d', x, y, slice_select); %#ok<AGROW>
+
+    set(handles.text24,'String', sprintf( ...
+        '%d voxel(s) selected. Click more or press Enter to finish.', vox_idx))
+end
+
+if vox_idx == 0
+    errordlg('No voxels selected.','Selection Error','modal')
+    return
+end
+
+set(handles.text24,'String','Done — see figure for time series & power spectrum.')
+
+% --- Build figure ---
+fig = figure('Name','Time Series & Power Spectrum', ...
+             'NumberTitle','off', ...
+             'Position',[100 100 1000 700]);
+
+% Store shared data in figure UserData
+ud.all_ts       = all_ts;
+ud.voxel_labels = voxel_labels;
+ud.vox_idx      = vox_idx;
+ud.ax_ts        = axes(fig,'Position',[0.08 0.42 0.88 0.42]);
+ud.ax_psd       = axes(fig,'Position',[0.08 0.06 0.88 0.28]);
+set(fig,'UserData', ud)
+
+% --- Scaling selector ---
+bg = uibuttongroup(fig, ...
+    'Title','Scaling', ...
+    'Units','normalized', ...
+    'Position',[0.01 0.88 0.25 0.11], ...
+    'SelectionChangedFcn', @ts_draw_plots);
+
+uicontrol(bg,'Style','radiobutton','String','Raw',           ...
+    'Units','normalized','Position',[0.02 0.55 0.45 0.40],'Value',1);
+uicontrol(bg,'Style','radiobutton','String','Demeaned',      ...
+    'Units','normalized','Position',[0.50 0.55 0.48 0.40],'Value',0);
+uicontrol(bg,'Style','radiobutton','String','Percent Change',...
+    'Units','normalized','Position',[0.02 0.05 0.95 0.40],'Value',0);
+
+% --- Power spectrum scaling selector ---
+bg_psd = uibuttongroup(fig, ...
+    'Title','PSD Scale', ...
+    'Units','normalized', ...
+    'Position',[0.28 0.88 0.15 0.11], ...
+    'SelectionChangedFcn', @ts_draw_plots);
+
+uicontrol(bg_psd,'Style','radiobutton','String','Raw', ...
+    'Units','normalized','Position',[0.05 0.55 0.90 0.40],'Value',1);
+uicontrol(bg_psd,'Style','radiobutton','String','Log', ...
+    'Units','normalized','Position',[0.05 0.05 0.90 0.40],'Value',0);
+
+% Store bg_psd in UserData so ts_draw_plots can find it
+ud = get(fig,'UserData');
+ud.bg_psd = bg_psd;
+ud.bg_ts  = bg;
+set(fig,'UserData', ud)
+
+% Initial draw
+ts_draw_plots(bg, [])
+
+
+
+% ---------------------------------------------------------------
+%  Standalone drawing function (not nested)
+% ---------------------------------------------------------------
+function ts_draw_plots(bg, ~)
+
+fig = ancestor(bg,'figure');
+ud  = get(fig,'UserData');
+
+all_ts       = ud.all_ts;
+voxel_labels = ud.voxel_labels;
+vox_idx      = ud.vox_idx;
+ax_ts        = ud.ax_ts;
+ax_psd       = ud.ax_psd;
+bg_psd       = ud.bg_psd;
+
+% --- Time series scaling ---
+selected  = get(ud.bg_ts,'SelectedObject');
+scaleMode = get(selected,'String');
+
+switch scaleMode
+    case 'Raw'
+        data = all_ts;
+        ylab = 'Signal (a.u.)';
+    case 'Demeaned'
+        data = all_ts - mean(all_ts, 1);
+        ylab = 'Signal − mean';
+    case 'Percent Change'
+        mu        = mean(all_ts, 1);
+        mu(mu==0) = NaN;
+        data      = 100 * (all_ts - mu) ./ mu;
+        ylab      = '% Change from mean';
+end
+
+n_tp   = size(data, 1);
+t      = (0 : n_tp-1)';
+colors = lines(vox_idx);
+
+% ---- Time series plot ----
+cla(ax_ts)
+hold(ax_ts,'on')
+for v = 1:vox_idx
+    plot(ax_ts, t, data(:,v), 'Color', colors(v,:), ...
+        'LineWidth', 1.4, 'DisplayName', voxel_labels{v})
+end
+hold(ax_ts,'off')
+xlabel(ax_ts,'Volume (TR)')
+ylabel(ax_ts, ylab)
+title(ax_ts,'Time Series')
+legend(ax_ts,'Location','best')
+grid(ax_ts,'on')
+
+% --- Power spectrum scaling ---
+psd_selected  = get(bg_psd,'SelectedObject');
+psdMode       = get(psd_selected,'String');
+
+% ---- Power spectrum plot ----
+cla(ax_psd)
+hold(ax_psd,'on')
+for v = 1:vox_idx
+    sig             = data(:,v);
+    sig(isnan(sig)) = 0;
+    N               = length(sig);
+    f               = (0 : floor(N/2)) / N;
+    Y               = fft(sig);
+    pwr             = (1/N) * abs(Y(1:floor(N/2)+1)).^2;
+    pwr(2:end-1)    = 2 * pwr(2:end-1);
+    plot(ax_psd, f, pwr, 'Color', colors(v,:), ...
+        'LineWidth', 1.2, 'DisplayName', voxel_labels{v})
+end
+hold(ax_psd,'off')
+
+% Apply log or linear scaling to the y-axis
+switch psdMode
+    case 'Log'
+        set(ax_psd,'YScale','log')
+        ylabel(ax_psd,'Power (log scale)')
+    case 'Raw'
+        set(ax_psd,'YScale','linear')
+        ylabel(ax_psd,'Power')
+end
+
+xlabel(ax_psd,'Normalised Frequency (cycles / TR)')
+title(ax_psd,'Power Spectrum (one-sided)')
+legend(ax_psd,'Location','best')
+grid(ax_psd,'on')
+
+
+
+
+
+
 % --------------------------------------------------------------------
 function tSNR_calc_Callback(hObject, eventdata, handles)
 % hObject    handle to tSNR_calc (see GCBO)
