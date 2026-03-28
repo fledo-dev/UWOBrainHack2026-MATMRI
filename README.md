@@ -4,7 +4,7 @@
 
 **Package supports:**
 - **Reconstruction**
-  - non-Cartesian regridding
+  - non-cartesian regridding
   - iterative SENSE (Cartesian or non-Cartesian)
   - iterative SENSE for higher-order signal models including:
     - B0 inhomogeneity correction
