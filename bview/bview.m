@@ -27,7 +27,7 @@ function varargout = bview(varargin)
 
 % Edit the above text to modify the response to help bview
 
-% Last Modified by GUIDE v2.5 28-Mar-2026 13:35:49
+% Last Modified by GUIDE v2.5 28-Mar-2026 17:57:28
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -2894,5 +2894,3 @@ handles.tSNR = tSNR;
 
 % Push to base workspace
 assignin('base',[get_var_name(handles) '_tSNRmap'],tSNR);
-
-
