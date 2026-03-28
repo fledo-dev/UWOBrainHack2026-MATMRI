@@ -27,7 +27,7 @@ function varargout = bview(varargin)
 
 % Edit the above text to modify the response to help bview
 
-% Last Modified by GUIDE v2.5 04-Oct-2019 10:57:39
+% Last Modified by GUIDE v2.5 28-Mar-2026 13:35:49
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -290,24 +290,30 @@ if strcmp(get(handles.edit9,'String'),'-') || (handles.scaletype == 2)
     set(handles.edit_max2,'String', handles.maxvalue2)
 end 
 %Check if Array Sizes Match for Multiple Images(Multiple/Overlap options) 
-if ~isempty(handles.img2) 
-    if (handles.extractiontype == 5) && (size(handles.img_ex,1)==3)
-        dim1 = 4;
-        dim2 = 5;
-        dim3 = 6;
-    else
-        dim1 = 3;
-        dim2 = 4;
-        dim3 = 5;
+if (handles.extractiontype == 5) && (size(handles.img_ex,1)==3)
+    spatial_dims = [2, 3, 4]; % rows, cols, slices (shifted by RGB channel)
+else
+    spatial_dims = [1, 2, 3]; % rows, cols, slices
+end
+
+for i = 2:4
+    if eval(sprintf('~isempty(handles.img%d)',i))
+        mismatch = false;
+        for d = spatial_dims
+            base_sz = size(handles.img_ex, d);
+            other_sz = eval(sprintf('size(handles.img_ex%d, %d)', i, d));
+            % Only error if both have that dimension and they disagree
+            if base_sz > 1 && other_sz > 1 && base_sz ~= other_sz
+                mismatch = true;
+                break;
+            end
+        end
+        if mismatch
+            errordlg('Spatial dimensions (rows/cols/slices) do not match between images.', ...
+                     'Array Dimensions Do Not Match', 'modal')
+        end
     end
-    for i = 2:4
-        if eval(sprintf('~isempty(handles.img%d)',i)) 
-        if eval(sprintf('size(handles.img_ex,dim1) ~= size(handles.img_ex%d,dim1) | size(handles.img_ex,dim2) ~= size(handles.img_ex%d,dim2) | size(handles.img_ex,dim3) ~= size(handles.img_ex%d,dim3)',i,i,i)) 
-            errordlg('Array Dimensions Do Not Match','Array Dimensions Do Not Match','modal') 
-        end 
-        end 
-    end 
-end 
+end
 %set min and max values if var3 and var4 upon selections
 for i = 3:4
     if eval(sprintf('~isempty(handles.img%d)',i)) 
@@ -491,10 +497,10 @@ end
 % Apply view
 if type~=5
     if view == 2
-        output = permute(input,[3 1 2 4 5 6]);
+        output = permute(output,[3 1 2 4 5 6]);
         output = flipdim(output,1);
     elseif view == 3
-        output = permute(input,[3 2 1 4 5 6]);
+        output = permute(output,[3 2 1 4 5 6]);
         output = flipdim(output,1);
     end
 end
@@ -509,13 +515,253 @@ output = sqrt(3/2)*sqrt((D(1)-meanD)^2 + (D(2)-meanD)^2 + (D(3)-meanD)^2)/...
     sqrt(D(1)^2+D(2)^2+D(3)^2);
 clear meanD D
 
+%%
+% function showimage(hObject,handles)
+% % Retrieve relevant parameters for slice and array selection
+% slice_select = round(get(handles.slider1,'Value'));
+% array_select = round(get(handles.slider2,'Value'));
+% array_select2 = round(get(handles.slider5,'Value'));
+% % wnd = get(handles.slider3,'Value');
+% % lvl = get(handles.slider4,'Value');
+% 
+% if iscell(handles.img)
+%   array_select2 = 1;
+%   handles.img_ex = extraction(handles.slider5,handles.img,handles.extractiontype,handles.view);
+%   for i = 2:4
+%      if eval(sprintf('~isempty(handles.img%d)',i))   
+%         eval(sprintf('handles.img_ex%d = extraction(handles.slider5,handles.img%d,handles.extractiontype,handles.view);',i,i))
+%      end 
+%   end 
+% end
+% 
+% if (handles.extractiontype == 5) && (size(handles.img_ex,1)==3)
+% %     imsize = size(handles.img_ex);
+% %     parray = circshift(1:length(imsize),[0 1]);
+% %     img_tmp = handles.img_ex(:,:,slice_select,array_select,array_select2);
+%     imsize = size(squeeze(handles.img_ex(1,:,:,slice_select,array_select,array_select2)));
+%     if min( imsize == size(handles.mask) )
+%         image( permute( handles.img_ex(:,:,:,slice_select,array_select,array_select2), [2 3 1] ).*...
+%             repmat(handles.mask, [1 1 3] ))
+%     else
+%         image( permute( handles.img_ex(:,:,:,slice_select,array_select,array_select2), [2 3 1] ) )
+%     end
+%     axis image
+% else
+% % Scale the image
+%     maxlevel = handles.maxvalue;
+%     minlevel = handles.minvalue;
+%     for i = 2:4
+%         if eval(sprintf('~isempty(handles.img%d)',i)) %handles.imgopt == 2 || handles.imgopt == 3  
+%             eval(sprintf('maxlevel%d = handles.maxvalue%d;',i,i)) % maxlevel2 = handles.maxvalue2; 
+%             eval(sprintf('minlevel%d = handles.minvalue%d;',i,i))  %minlevel2 = handles.minvalue2;
+%         end 
+%     end 
+%     % Apply the mask, if present
+%     if min(size(handles.img_ex(:,:,slice_select,array_select,array_select2)) == size(handles.mask) )
+%         img = handles.img_ex(:,:,slice_select,array_select,array_select2).*handles.mask;
+%         for i = 2:4 
+%             if eval(sprintf('~isempty(handles.img%d)',i)) && eval(sprintf('min(size(handles.img_ex%d(:,:,slice_select,array_select,array_select2)) == size(handles.mask%d))',i,i))  
+%                 eval(sprintf('img%d = handles.img_ex%d(:,:,slice_select,array_select,array_select2).*handles.mask%d;',i,i,i))  
+%             end 
+%         end 
+%     else
+%         img = handles.img_ex(:,:,slice_select,array_select,array_select2);
+%         for i = 2:4 
+%             if eval(sprintf('~isempty(handles.img%d)',i))  
+%                 eval(sprintf('img%d = handles.img_ex%d(:,:,slice_select,array_select,array_select2);',i,i)) 
+%             end 
+%         end 
+%     end
+% 
+%     % Apply the aspectrato
+%     if handles.aspecttype == 1
+%         % Here handles.aspectratio gives the in-plane aspect ratio of the voxels
+%         mfact = handles.aspectratio;
+%         for i = 2:4 
+%         if eval(sprintf('~isempty(handles.img%d)',i))   
+%             eval(sprintf('mfact%d = handles.aspectratio;',i))  
+%         end 
+%         end 
+%     else
+%         % Here handles.aspectratio gives the in-plane aspect ratio of the FOV
+%         mfact = handles.aspectratio*size(handles.img_ex,2)/size(handles.img_ex,1);
+%         for i = 2:4 
+%         if eval(sprintf('~isempty(handles.img%d)',i))    
+%             eval(sprintf('mfact%d = handles.aspectratio*size(handles.img_ex%d,2)/size(handles.img_ex%d,1);',i,i,i)) 
+%         end 
+%         end 
+%     end
+%     if mfact < 1
+%         newmatrix = [size(handles.img_ex,1) round(size(handles.img_ex,2)/mfact)];
+%     else
+%         newmatrix = [round(size(handles.img_ex,1)*mfact) size(handles.img_ex,2)];
+%     end
+%     for i = 2:4
+%         if  eval(sprintf('~isempty(handles.img%d)',i))
+%             if eval(sprintf('mfact%d < 1',i))  
+%                 eval(sprintf('newmatrix%d = [size(handles.img_ex%d,1) round(size(handles.img_ex%d,2)/mfact)];',i,i,i,i))
+%             else
+%                 eval(sprintf('newmatrix%d = [round(size(handles.img_ex%d,1)*mfact%d) size(handles.img_ex%d,2)];',i,i,i,i))
+%             end
+%                 eval(sprintf('img%d = imresize(img%d,newmatrix%d,''nearest'');',i,i,i))
+%         end
+%     end 
+%     img = imresize(img,newmatrix,'nearest');
+% 
+% % Scale data
+%     maxthresh = img <= maxlevel;
+%     minthresh = img >= minlevel;
+%     img = ((img.*maxthresh.*minthresh + (1-maxthresh)*maxlevel +...
+%         (1-minthresh)*minlevel) - minlevel) / (maxlevel-minlevel);
+%     for i = 2:4 
+%         if eval(sprintf('~isempty(handles.img%d)',i)) 
+%             eval(sprintf( 'maxthresh%d = img%d <= maxlevel%d;',i,i,i)) 
+%             eval(sprintf('minthresh%d = img%d >= minlevel%d;',i,i,i)) 
+%             eval(sprintf('img%d = ((img%d.*maxthresh%d.*minthresh%d + (1-maxthresh%d)*maxlevel%d + (1-minthresh%d)*minlevel%d) - minlevel%d) / (maxlevel%d-minlevel%d);',i,i,i,i,i,i,i,i,i,i,i))
+%         end 
+%     end 
+% % show the image
+%     if ~isreal(img)
+%         img = abs(img);
+%         for i = 2:4 
+%             if eval(sprintf('~isempty(handles.img%d)',i)) 
+%                eval(sprintf('img%d = abs(img%d);',i,i))  
+%             end 
+%         end 
+%     end
+% %Plotting the Images   
+%     if handles.colour == 2  % Colour selected or Real data type
+%         if handles.imgopt == 3 % Overlap
+%             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%             I = imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit'); 
+%             red = cat(3,ones(size(img)),zeros(size(img)),zeros(size(img)));
+%             hold on 
+%             h = imshow(red,'InitialMagnification','fit'); 
+%             set(h,'AlphaData',img2);
+%             hold off
+%             colorbar  % <-- ADDED
+% 
+%         elseif handles.imgopt == 2 % Multiple 
+%             subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,1)
+%                 imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit');
+%                 set(gca,'Position',[0.1562+((1-rem(1,2))*0.3125), 0.079+((round(1/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                 colorbar  % <-- ADDED
+%                 showroi(handles,slice_select,img)
+%            for i = 2:4
+%                if eval(sprintf('~isempty(handles.img%d)',i)) 
+%                    subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
+%                    eval(sprintf('imshow(img%d,''Colormap'',handles.cmap,''InitialMagnification'',''fit'')',i))
+%                    set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                    colorbar  % <-- ADDED
+%                    showroi(handles,slice_select,img) 
+%                end 
+%            end       
+%         else % Single 
+%            set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%            imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit')
+%            colorbar  % <-- ADDED
+%         end 
+% 
+%     else % Grayscale
+%         if handles.imgopt == 3 % Overlap
+%             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%             I = imshow(img,[0,1],'InitialMagnification','fit');   
+%             red = cat(3,ones(size(img)),zeros(size(img)), zeros(size(img)));
+%             hold on 
+%             h = imshow(red,'InitialMagnification','fit'); 
+%             set(h,'AlphaData',img2);
+%             hold off
+%             colorbar  % <-- ADDED
+% 
+%         elseif handles.imgopt == 2  % Multiple
+%             subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,1)
+%                 imshow(img,[0 1],'InitialMagnification','fit');
+%                 set(gca,'Position',[0.1562+((1-rem(1,2))*0.3125), 0.079+((round(1/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                 colorbar  % <-- ADDED
+%                 showroi(handles,slice_select,img)
+%            for i = 2:4
+%                if eval(sprintf('~isempty(handles.img%d)',i)) 
+%                    subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
+%                    eval(sprintf('imshow(img%d,[0 1],''InitialMagnification'',''fit'')',i))
+%                    set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                    colorbar  % <-- ADDED
+%                    showroi(handles,slice_select,img) 
+%                end 
+%            end 
+%         else  % Single (Default)
+%             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%             imshow(img,[0 1],'InitialMagnification','fit')
+%             colorbar  % already present
+%         end 
+%     end
+
+    %%%%
+%     if handles.colour == 2  %Colour selected or Real data type
+% %         imshow(img,handles.cmap,'InitialMagnification','fit')
+%         if handles.imgopt == 3 % Overlap
+%             set(gca,'Position',[0.1562,0.079,0.625,0.8180]) %possibly use reset instead
+%             I = imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit'); 
+%             red = cat(3,ones(size(img)),zeros(size(img)),zeros(size(img)));
+%             hold on 
+%             h = imshow(red,'InitialMagnification','fit'); 
+%             set(h,'AlphaData',img2); %Transparency Map 
+%             hold off 
+%         elseif handles.imgopt == 2 %Multiple 
+%             subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,1)
+%                 imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit');
+%                 set(gca,'Position',[0.1562+((1-rem(1,2))*0.3125), 0.079+((round(1/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                 showroi(handles,slice_select,img)
+%            for i = 2:4
+%                if eval(sprintf('~isempty(handles.img%d)',i)) 
+%                subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
+%                   eval(sprintf('imshow(img%d,''Colormap'',handles.cmap,''InitialMagnification'',''fit'')',i))
+%                   set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                   showroi(handles,slice_select,img) 
+%                end 
+%            end       
+%         else %Single 
+%            set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%            imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit')
+%         end 
+%     else %Grayscale
+%         if handles.imgopt == 3 %Overlap
+%             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%             I = imshow(img,[0,1],'InitialMagnification','fit');   
+%             red = cat(3,ones(size(img)),zeros(size(img)), zeros(size(img)));
+%             hold on 
+%             h = imshow(red,'InitialMagnification','fit'); 
+%             set(h,'AlphaData',img2);
+%             hold off 
+%         elseif handles.imgopt == 2  %Multiple
+%             subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,1)
+%                 imshow(img,[0 1],'InitialMagnification','fit');
+%                 set(gca,'Position',[0.1562+((1-rem(1,2))*0.3125), 0.079+((round(1/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                 showroi(handles,slice_select,img)
+%            for i = 2:4
+%                if eval(sprintf('~isempty(handles.img%d)',i)) 
+%                  subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
+%                   eval(sprintf('imshow(img%d,[0 1],''InitialMagnification'',''fit'')',i))
+%                   set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+%                   showroi(handles,slice_select,img) 
+%                end 
+%            end 
+%         else  %Single (Default Image) 
+%             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+%             imshow(img,[0 1],'InitialMagnification','fit')
+%             colorbar;
+% %         imshow(img,[0 1],'InitialMagnification','fit')
+%         end 
+%     end
+%Show volume ROIs if present
+%         showroi(handles,slice_select,img)
+%         clear img clear img2 img3 img4 
+% end
+
 function showimage(hObject,handles)
 % Retrieve relevant parameters for slice and array selection
 slice_select = round(get(handles.slider1,'Value'));
 array_select = round(get(handles.slider2,'Value'));
 array_select2 = round(get(handles.slider5,'Value'));
-% wnd = get(handles.slider3,'Value');
-% lvl = get(handles.slider4,'Value');
 
 if iscell(handles.img)
   array_select2 = 1;
@@ -528,9 +774,6 @@ if iscell(handles.img)
 end
 
 if (handles.extractiontype == 5) && (size(handles.img_ex,1)==3)
-%     imsize = size(handles.img_ex);
-%     parray = circshift(1:length(imsize),[0 1]);
-%     img_tmp = handles.img_ex(:,:,slice_select,array_select,array_select2);
     imsize = size(squeeze(handles.img_ex(1,:,:,slice_select,array_select,array_select2)));
     if min( imsize == size(handles.mask) )
         image( permute( handles.img_ex(:,:,:,slice_select,array_select,array_select2), [2 3 1] ).*...
@@ -540,17 +783,18 @@ if (handles.extractiontype == 5) && (size(handles.img_ex,1)==3)
     end
     axis image
 else
-% Scale the image
+    % Scale the image
     maxlevel = handles.maxvalue;
     minlevel = handles.minvalue;
     for i = 2:4
-        if eval(sprintf('~isempty(handles.img%d)',i)) %handles.imgopt == 2 || handles.imgopt == 3  
-            eval(sprintf('maxlevel%d = handles.maxvalue%d;',i,i)) % maxlevel2 = handles.maxvalue2; 
-            eval(sprintf('minlevel%d = handles.minvalue%d;',i,i))  %minlevel2 = handles.minvalue2;
+        if eval(sprintf('~isempty(handles.img%d)',i))
+            eval(sprintf('maxlevel%d = handles.maxvalue%d;',i,i))
+            eval(sprintf('minlevel%d = handles.minvalue%d;',i,i))
         end 
     end 
+
     % Apply the mask, if present
-    if min(size(handles.img_ex(:,:,slice_select,array_select,array_select2)) == size(handles.mask) )
+    if min(size(handles.img_ex(:,:,slice_select,array_select,array_select2)) == size(handles.mask))
         img = handles.img_ex(:,:,slice_select,array_select,array_select2).*handles.mask;
         for i = 2:4 
             if eval(sprintf('~isempty(handles.img%d)',i)) && eval(sprintf('min(size(handles.img_ex%d(:,:,slice_select,array_select,array_select2)) == size(handles.mask%d))',i,i))  
@@ -566,54 +810,54 @@ else
         end 
     end
 
-    % Apply the aspectrato
+    % Apply the aspect ratio
     if handles.aspecttype == 1
-        % Here handles.aspectratio gives the in-plane aspect ratio of the voxels
         mfact = handles.aspectratio;
         for i = 2:4 
-        if eval(sprintf('~isempty(handles.img%d)',i))   
-            eval(sprintf('mfact%d = handles.aspectratio;',i))  
-        end 
+            if eval(sprintf('~isempty(handles.img%d)',i))   
+                eval(sprintf('mfact%d = handles.aspectratio;',i))  
+            end 
         end 
     else
-        % Here handles.aspectratio gives the in-plane aspect ratio of the FOV
         mfact = handles.aspectratio*size(handles.img_ex,2)/size(handles.img_ex,1);
         for i = 2:4 
-        if eval(sprintf('~isempty(handles.img%d)',i))    
-            eval(sprintf('mfact%d = handles.aspectratio*size(handles.img_ex%d,2)/size(handles.img_ex%d,1);',i,i,i)) 
-        end 
+            if eval(sprintf('~isempty(handles.img%d)',i))    
+                eval(sprintf('mfact%d = handles.aspectratio*size(handles.img_ex%d,2)/size(handles.img_ex%d,1);',i,i,i)) 
+            end 
         end 
     end
+
     if mfact < 1
         newmatrix = [size(handles.img_ex,1) round(size(handles.img_ex,2)/mfact)];
     else
         newmatrix = [round(size(handles.img_ex,1)*mfact) size(handles.img_ex,2)];
     end
     for i = 2:4
-        if  eval(sprintf('~isempty(handles.img%d)',i))
+        if eval(sprintf('~isempty(handles.img%d)',i))
             if eval(sprintf('mfact%d < 1',i))  
-                eval(sprintf('newmatrix%d = [size(handles.img_ex%d,1) round(size(handles.img_ex%d,2)/mfact)];',i,i,i,i))
+                eval(sprintf('newmatrix%d = [size(handles.img_ex%d,1) round(size(handles.img_ex%d,2)/mfact%d)];',i,i,i,i))
             else
                 eval(sprintf('newmatrix%d = [round(size(handles.img_ex%d,1)*mfact%d) size(handles.img_ex%d,2)];',i,i,i,i))
             end
-                eval(sprintf('img%d = imresize(img%d,newmatrix%d,''nearest'');',i,i,i))
+            eval(sprintf('img%d = imresize(img%d,newmatrix%d,''nearest'');',i,i,i))
         end
     end 
     img = imresize(img,newmatrix,'nearest');
-    
-% Scale data
+
+    % Scale data to [0,1]
     maxthresh = img <= maxlevel;
     minthresh = img >= minlevel;
-    img = ((img.*maxthresh.*minthresh + (1-maxthresh)*maxlevel +...
+    img = ((img.*maxthresh.*minthresh + (1-maxthresh)*maxlevel + ...
         (1-minthresh)*minlevel) - minlevel) / (maxlevel-minlevel);
     for i = 2:4 
         if eval(sprintf('~isempty(handles.img%d)',i)) 
-            eval(sprintf( 'maxthresh%d = img%d <= maxlevel%d;',i,i,i)) 
+            eval(sprintf('maxthresh%d = img%d <= maxlevel%d;',i,i,i)) 
             eval(sprintf('minthresh%d = img%d >= minlevel%d;',i,i,i)) 
             eval(sprintf('img%d = ((img%d.*maxthresh%d.*minthresh%d + (1-maxthresh%d)*maxlevel%d + (1-minthresh%d)*minlevel%d) - minlevel%d) / (maxlevel%d-minlevel%d);',i,i,i,i,i,i,i,i,i,i,i))
         end 
     end 
-% show the image
+
+    % Take absolute value if complex
     if ~isreal(img)
         img = abs(img);
         for i = 2:4 
@@ -622,66 +866,99 @@ else
             end 
         end 
     end
-%Plotting the Images     
-    if handles.colour == 2  %Colour selected or Real data type
-%         imshow(img,handles.cmap,'InitialMagnification','fit')
-        if handles.imgopt == 3 % Overlap
-            set(gca,'Position',[0.1562,0.079,0.625,0.8180]) %possibly use reset instead
+
+    % Colorbar helper: attach to specified axes with true data range labels
+    apply_colorbar = @(ax, minl, maxl) set(colorbar(ax), 'Ticks', linspace(0,1,5), ...
+        'TickLabels', arrayfun(@(v) sprintf('%.2f',v), ...
+        linspace(minl,maxl,5), 'UniformOutput', false));
+
+    % Plotting the Images
+    if handles.colour == 2  % Colour
+        if handles.imgopt == 3  % Overlap
+            set(gca,'Position',[0.1562,0.079,0.625,0.8180])
             I = imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit'); 
+            base_ax = get(I,'Parent');
             red = cat(3,ones(size(img)),zeros(size(img)),zeros(size(img)));
             hold on 
             h = imshow(red,'InitialMagnification','fit'); 
-            set(h,'AlphaData',img2); %Transparency Map 
-            hold off 
-        elseif handles.imgopt == 2 %Multiple 
+            set(h,'AlphaData',img2);
+            apply_colorbar(base_ax, minlevel, maxlevel)
+            hold off
+            impixelinfo();
+
+        elseif handles.imgopt == 2  % Multiple
             subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,1)
                 imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit');
                 set(gca,'Position',[0.1562+((1-rem(1,2))*0.3125), 0.079+((round(1/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+                apply_colorbar(gca, minlevel, maxlevel)
                 showroi(handles,slice_select,img)
-           for i = 2:4
-               if eval(sprintf('~isempty(handles.img%d)',i)) 
-               subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
-                  eval(sprintf('imshow(img%d,''Colormap'',handles.cmap,''InitialMagnification'',''fit'')',i))
-                  set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
-                  showroi(handles,slice_select,img) 
-               end 
-           end       
-        else %Single 
-           set(gca,'Position',[0.1562,0.079,0.625,0.8180])
-           imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit')
-        end 
-    else %Grayscale
-        if handles.imgopt == 3 %Overlap
+            for i = 2:4
+                if eval(sprintf('~isempty(handles.img%d)',i)) 
+                    subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
+                    eval(sprintf('imshow(img%d,''Colormap'',handles.cmap,''InitialMagnification'',''fit'')',i))
+                    set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+                    minl = eval(sprintf('minlevel%d',i));
+                    maxl = eval(sprintf('maxlevel%d',i));
+                    apply_colorbar(gca, minl, maxl)
+                    showroi(handles,slice_select,img) 
+                    impixelinfo();
+                end 
+            end
+
+        else  % Single
             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
-            I = imshow(img,[0,1],'InitialMagnification','fit');   
-            red = cat(3,ones(size(img)),zeros(size(img)), zeros(size(img)));
+            imshow(img,'Colormap',handles.cmap,'InitialMagnification','fit')
+            apply_colorbar(gca, minlevel, maxlevel)
+            impixelinfo();
+        end 
+
+    else  % Grayscale
+        if handles.imgopt == 3  % Overlap
+            set(gca,'Position',[0.1562,0.079,0.625,0.8180])
+            I = imshow(img,[0,1],'InitialMagnification','fit');
+            base_ax = get(I,'Parent');
+            red = cat(3,ones(size(img)),zeros(size(img)),zeros(size(img)));
             hold on 
             h = imshow(red,'InitialMagnification','fit'); 
             set(h,'AlphaData',img2);
-            hold off 
-        elseif handles.imgopt == 2  %Multiple
+            apply_colorbar(base_ax, minlevel, maxlevel)
+            hold off
+            impixelinfo();
+
+        elseif handles.imgopt == 2  % Multiple
             subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,1)
                 imshow(img,[0 1],'InitialMagnification','fit');
+                impixelinfo();
                 set(gca,'Position',[0.1562+((1-rem(1,2))*0.3125), 0.079+((round(1/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+                apply_colorbar(gca, minlevel, maxlevel)
                 showroi(handles,slice_select,img)
-           for i = 2:4
-               if eval(sprintf('~isempty(handles.img%d)',i)) 
-                 subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
-                  eval(sprintf('imshow(img%d,[0 1],''InitialMagnification'',''fit'')',i))
-                  set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
-                  showroi(handles,slice_select,img) 
-               end 
-           end 
-        else  %Single (Default Image) 
+            for i = 2:4
+                if eval(sprintf('~isempty(handles.img%d)',i)) 
+                    subplot(round((handles.varlength/4)*2),round(handles.varlength/2)*2,i)
+                    impixelinfo();
+                    eval(sprintf('imshow(img%d,[0 1],''InitialMagnification'',''fit'')',i))
+                    set(gca,'Position',[0.1562+((1-rem(i,2))*0.3125), 0.079+((round(i/5))*0.490),0.3125,0.8180/round(handles.varlength/2)])
+                    minl = eval(sprintf('minlevel%d',i));
+                    maxl = eval(sprintf('maxlevel%d',i));
+                    apply_colorbar(gca, minl, maxl)
+                    showroi(handles,slice_select,img) 
+                end 
+            end 
+
+        else  % Single (Default)
             set(gca,'Position',[0.1562,0.079,0.625,0.8180])
             imshow(img,[0 1],'InitialMagnification','fit')
-%         imshow(img,[0 1],'InitialMagnification','fit')
+            apply_colorbar(gca, minlevel, maxlevel)
+            impixelinfo();
         end 
     end
-%Show volume ROIs if present
-        showroi(handles,slice_select,img)
-        clear img clear img2 img3 img4 
+
+    % Show volume ROIs if present
+    showroi(handles,slice_select,img)
+    clear img img2 img3 img4
 end
+
+
 
 function showroi(handles,slice_select,img) %shows all ROI Selected
     sz = size(handles.ROI_3d); % ROI (default)  
@@ -2395,3 +2672,28 @@ set(handles.text_minmax3, 'String',sprintf('Min3: %d Max3: %d',handles.minvalue3
 guidata(hObject, handles);
 % Show the image
 showimage(hObject,handles)
+
+
+% --------------------------------------------------------------------
+function tSNR_calc_Callback(hObject, eventdata, handles)
+% hObject    handle to tSNR_calc (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+data = handles.img_ex;
+
+% Compute tSNR voxelwise (along time dimension)
+mu  = mean(data, ndims(data));
+sig = std(data, 0, ndims(data));
+
+% Avoid division by zero
+sig(sig == 0) = eps;
+
+tSNR = mu ./ sig;
+
+% Store in handles
+handles.tSNR = tSNR;
+
+% Push to base workspace
+assignin('base',[get_var_name(handles) '_tSNRmap'],tSNR);
+
+
